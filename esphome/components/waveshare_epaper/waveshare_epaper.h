@@ -1099,7 +1099,7 @@ class WaveshareEPaper13P3InK : public WaveshareEPaper {
   uint32_t idle_timeout_() override;
 };
 
-
+// WeAct 2.9in3c e-paper display driver
 class WeActEPaper2P9In3C : public WaveshareEPaperBWR {
  public:
   void display() override;

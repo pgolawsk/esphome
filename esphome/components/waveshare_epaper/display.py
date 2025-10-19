@@ -122,6 +122,7 @@ WaveshareEPaper2P13InV3 = waveshare_epaper_ns.class_(
 WaveshareEPaper13P3InK = waveshare_epaper_ns.class_(
     "WaveshareEPaper13P3InK", WaveshareEPaper
 )
+# WeAct 2.9in3c e-paper display driver
 WeActEPaper2P9In3C = waveshare_epaper_ns.class_(
     "WeActEPaper2P9In3C", WaveshareEPaperBWR
 )
