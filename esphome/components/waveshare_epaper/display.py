@@ -14,6 +14,8 @@ from esphome.const import (
     CONF_RESET_PIN,
 )
 
+CONF_DISPLAY_MODE = "display_mode"
+
 DEPENDENCIES = ["spi"]
 
 waveshare_epaper_ns = cg.esphome_ns.namespace("waveshare_epaper")
@@ -67,6 +69,9 @@ WaveshareEPaper4P2In = waveshare_epaper_ns.class_(
 WaveshareEPaper4P2InBV2 = waveshare_epaper_ns.class_(
     "WaveshareEPaper4P2InBV2", WaveshareEPaper
 )
+WaveshareEPaper4P2InV2 = waveshare_epaper_ns.class_(
+    "WaveshareEPaper4P2InV2", WaveshareEPaper
+)
 WaveshareEPaper4P2InBV2BWR = waveshare_epaper_ns.class_(
     "WaveshareEPaper4P2InBV2BWR", WaveshareEPaperBWR
 )
@@ -119,6 +124,13 @@ WaveshareEPaper2P13InV2 = waveshare_epaper_ns.class_(
 WaveshareEPaper2P13InV3 = waveshare_epaper_ns.class_(
     "WaveshareEPaper2P13InV3", WaveshareEPaper
 )
+WeActEPaper2P9In = waveshare_epaper_ns.class_("WeActEPaper2P9In", WaveshareEPaper)
+WeActEPaper2P9In3C = waveshare_epaper_ns.class_(
+    "WeActEPaper2P9In3C", WaveshareEPaperBWR
+)
+WeActEPaper4P2In3C = waveshare_epaper_ns.class_(
+    "WeActEPaper4P2In3C", WaveshareEPaperBWR
+)
 WaveshareEPaper13P3InK = waveshare_epaper_ns.class_(
     "WaveshareEPaper13P3InK", WaveshareEPaper
 )
@@ -139,7 +151,10 @@ MODELS = {
     "2.13in-ttgo-b74": ("a", WaveshareEPaperTypeAModel.TTGO_EPAPER_2_13_IN_B74),
     "2.90in": ("a", WaveshareEPaperTypeAModel.WAVESHARE_EPAPER_2_9_IN),
     "2.90inv2": ("a", WaveshareEPaperTypeAModel.WAVESHARE_EPAPER_2_9_IN_V2),
+    "wa2.90in": ("c", WeActEPaper2P9In),
+    "wa2.90in3c": ("b", WeActEPaper2P9In3C),
     "gdew029t5": ("c", GDEW029T5),
+    # "gdey029t94": ("c", GDEY029T94),
     "2.70in": ("b", WaveshareEPaper2P7In),
     "2.70in-b": ("b", WaveshareEPaper2P7InB),
     "2.70in-bv2": ("b", WaveshareEPaper2P7InBV2),
@@ -153,6 +168,8 @@ MODELS = {
     "gdey042t81": ("c", GDEY042T81),
     "4.20in": ("b", WaveshareEPaper4P2In),
     "4.20in-bv2": ("b", WaveshareEPaper4P2InBV2),
+    "4.20in-v2": ("a-alt", WaveshareEPaper4P2InV2),
+    "4.20in3c": ("b", WeActEPaper4P2In3C),
     "4.20in-bv2-bwr": ("b", WaveshareEPaper4P2InBV2BWR),
     "5.65in-f": ("b", WaveshareEPaper5P65InF),
     "5.83in": ("b", WaveshareEPaper5P8In),
@@ -175,6 +192,14 @@ MODELS = {
 }
 
 RESET_PIN_REQUIRED_MODELS = ("2.13inv2", "2.13in-ttgo-b74")
+
+DisplayMode = waveshare_epaper_ns.enum("DisplayMode")
+DISPLAY_MODES = {
+    "PARTIAL": DisplayMode.MODE_PARTIAL,
+    "FULL": DisplayMode.MODE_FULL,
+    "FAST": DisplayMode.MODE_FAST,
+    "GRAYSCALE4": DisplayMode.MODE_GRAYSCALE4,
+}
 
 
 def validate_full_update_every_only_types_ac(value):
@@ -200,6 +225,17 @@ def validate_reset_pin_required(config):
     return config
 
 
+def validate_grayscale4_supported(config):
+    print(config[CONF_MODEL])
+    if CONF_DISPLAY_MODE in config:
+        if config[CONF_MODEL] in ["4.20in-v2"]:
+            return config
+        raise cv.Invalid(
+            f"'{CONF_DISPLAY_MODE}' is not supported for model {config[CONF_MODEL]}"
+        )
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     display.FULL_DISPLAY_SCHEMA.extend(
         {
@@ -213,12 +249,14 @@ CONFIG_SCHEMA = cv.All(
                 cv.positive_time_period_milliseconds,
                 cv.Range(max=core.TimePeriod(milliseconds=500)),
             ),
+            cv.Optional(CONF_DISPLAY_MODE): cv.enum(DISPLAY_MODES, upper=True),
         }
     )
     .extend(cv.polling_component_schema("1s"))
     .extend(spi.spi_device_schema()),
     validate_full_update_every_only_types_ac,
     validate_reset_pin_required,
+    validate_grayscale4_supported,
     cv.has_at_most_one_key(CONF_PAGES, CONF_LAMBDA),
 )
 
@@ -232,7 +270,7 @@ async def to_code(config):
     if model_type == "a":
         rhs = WaveshareEPaperTypeA.new(model)
         var = cg.Pvariable(config[CONF_ID], rhs, WaveshareEPaperTypeA)
-    elif model_type in ("b", "c"):
+    elif model_type in ("a-alt", "b", "c"):
         rhs = model.new()
         var = cg.Pvariable(config[CONF_ID], rhs, model)
     else:
@@ -259,3 +297,5 @@ async def to_code(config):
         cg.add(var.set_full_update_every(config[CONF_FULL_UPDATE_EVERY]))
     if CONF_RESET_DURATION in config:
         cg.add(var.set_reset_duration(config[CONF_RESET_DURATION]))
+    if CONF_DISPLAY_MODE in config:
+        cg.add(var.set_display_mode(config[CONF_DISPLAY_MODE]))
