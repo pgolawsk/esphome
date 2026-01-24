@@ -12,6 +12,7 @@ namespace waveshare_epaper {
 // https://github.com/ZinggJM/GxEPD2/blob/220fc5845c08b83c8dbac63e0cb83e1a774071ca/src/epd3c/GxEPD2_290_C90c.cpp
 // - The datasheet is here
 // https://github.com/WeActStudio/WeActStudio.EpaperModule/blob/master/Doc/ZJY128296-029EAAMFGN.pdf
+// - @pgolawsk adjusted after changes of waveshare_epaper in esphome 2026.1.0
 
 static const char *const TAG = "weact_2.90_3c";
 
@@ -45,7 +46,7 @@ static const uint8_t RAM_Y_POS = 0x4F;
 
 int WeActEPaper2P9In3C::get_width_internal() { return WIDTH; }
 int WeActEPaper2P9In3C::get_height_internal() { return HEIGHT; }
-uint32_t WeActEPaper2P9In3C::idle_timeout_() { return 2500; }
+uint32_t WeActEPaper2P9In3C::idle_timeout_() { return 20000; }
 
 void WeActEPaper2P9In3C::dump_config() {
   LOG_DISPLAY("", "WeAct E-Paper (3 Color)", this)
@@ -60,6 +61,8 @@ void WeActEPaper2P9In3C::dump_config() {
 // Device lifecycle
 
 void WeActEPaper2P9In3C::setup() {
+  this->init_internal_(this->get_buffer_length_());
+  this->spi_setup();
   setup_pins_();
 
   if (this->buffer_ != nullptr) {
@@ -145,16 +148,18 @@ void HOT WeActEPaper2P9In3C::draw_absolute_pixel_internal(int x, int y, Color co
   const uint32_t pos = (x + y * this->get_width_internal()) / 8u;
   const uint8_t bit = 0x80 >> (x & 0x07);
   const uint32_t red_offset = this->get_buffer_length_() / 2u;
+  bool is_red = ((color.red > 0) && (color.green == 0) && (color.blue == 0));
 
-  // BLACK plane: 0 = white, 1 = black
-  if (color == display::COLOR_ON) {
-    this->buffer_[pos] |= bit;  // black
+  // BLACK PLANE: 0=Black, 1=White
+  // We want Black Ink if color is Active AND NOT Red.
+  if (color.is_on() && !is_red) {
+    this->buffer_[pos] &= ~bit;  // Black Ink
   } else {
-    this->buffer_[pos] &= ~bit;  // white
+    this->buffer_[pos] |= bit;  // White Paper
   }
 
-  // RED plane: 1 = red pixel
-  if (color.red > 0 && color.green == 0 && color.blue == 0) {
+  // RED PLANE: 1=Red, 0=None
+  if (is_red) {
     this->buffer_[pos + red_offset] |= bit;
   } else {
     this->buffer_[pos + red_offset] &= ~bit;
@@ -192,9 +197,7 @@ void WeActEPaper2P9In3C::full_update_() {
   this->write_buffer_(0, this->get_height_internal());
   SEND(UPDATE_FULL);
   this->command(ACTIVATE);
-  this->wait_until_idle_();
-
-  this->is_busy_ = false;
+  // Non-blocking: wait in loop()
 }
 // void WeActEPaper2P9In3C::full_update_() {
 //   ESP_LOGI(TAG, "Performing full e-paper update.");
@@ -228,6 +231,15 @@ void WeActEPaper2P9In3C::display() {
 
   this->is_busy_ = true;
   this->full_update_();
+}
+
+void WeActEPaper2P9In3C::loop() {
+  if (this->is_busy_) {
+    // Check if the display is done refreshing (BUSY pin low)
+    if (this->busy_pin_ == nullptr || !this->busy_pin_->digital_read()) {
+      this->is_busy_ = false;
+    }
+  }
 }
 
 }  // namespace waveshare_epaper
