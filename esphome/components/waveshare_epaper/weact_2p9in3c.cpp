@@ -63,25 +63,24 @@ void WeActEPaper2P9In3C::setup() {
   setup_pins_();
   delay(20);
 
-  // Correct buffer initialization for ESPHome 2026.x BWR semantics
+  // Correct buffer initialization for ESPHome 2026.x
   if (this->buffer_ != nullptr) {
     memset(this->buffer_, 0x00, this->get_buffer_length_());
   }
 
   this->send_reset_();
-  delay(100);  // NOLINT
-  this->wait_until_idle_();
+  delay(10);  // krótko, NIE czekamy na BUSY
 
   this->command(SW_RESET);
-  this->wait_until_idle_();
 
+  // konfiguracja bez czekania
   SEND(DRV_OUT_CTL);
   SEND(DATA_ENTRY);
   SEND(BORDER_FULL);
   SEND(TEMP_SENS);
   SEND(DISPLAY_UPDATE);
 
-  this->wait_until_idle_();
+  // oddaj czas RTOS i WYJDŹ z setup()
   yield();
 }
 
@@ -205,6 +204,8 @@ void HOT WeActEPaper2P9In3C::draw_absolute_pixel_internal(int x, int y, Color co
 void WeActEPaper2P9In3C::full_update_() {
   ESP_LOGI(TAG, "Performing full e-paper update.");
 
+  this->wait_until_idle_();
+
   this->write_buffer_(0, this->get_height_internal());
   SEND(UPDATE_FULL);
   this->command(ACTIVATE);
@@ -221,12 +222,10 @@ void WeActEPaper2P9In3C::full_update_() {
 // }
 
 void WeActEPaper2P9In3C::display() {
-  // Guard: skip first display call during boot
-  if (this->first_display_) {
-    this->first_display_ = false;
-    ESP_LOGD(TAG, "Skipping first display() during boot");
+  // allow system to mark boot as successful
+  if (millis() < 3000)
     return;
-  }
+
   if (this->is_busy_ || (this->busy_pin_ != nullptr && this->busy_pin_->digital_read()))
     return;
   this->is_busy_ = true;
