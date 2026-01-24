@@ -62,6 +62,13 @@ void WeActEPaper2P9In3C::dump_config() {
 void WeActEPaper2P9In3C::setup() {
   setup_pins_();
   delay(20);
+
+  // --- FIX: initialize display buffer to white ---
+  // Buffer is split into B/W and Red parts, both must be clean
+  if (this->buffer_ != nullptr) {
+    memset(this->buffer_, 0xFF, this->get_buffer_length_());
+  }
+
   this->send_reset_();
   // as a one-off delay this is not worth working around.
   delay(100);  // NOLINT
@@ -76,6 +83,7 @@ void WeActEPaper2P9In3C::setup() {
   SEND(DISPLAY_UPDATE);
 
   this->wait_until_idle_();
+  yield();
 }
 
 void WeActEPaper2P9In3C::send_reset_() {
@@ -159,6 +167,12 @@ void WeActEPaper2P9In3C::full_update_() {
 }
 
 void WeActEPaper2P9In3C::display() {
+  // Guard: skip first display call during boot
+  if (this->first_display_) {
+    this->first_display_ = false;
+    ESP_LOGD(TAG, "Skipping first display() during boot");
+    return;
+  }
   if (this->is_busy_ || (this->busy_pin_ != nullptr && this->busy_pin_->digital_read()))
     return;
   this->is_busy_ = true;
