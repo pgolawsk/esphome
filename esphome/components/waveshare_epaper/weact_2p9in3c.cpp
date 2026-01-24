@@ -63,16 +63,15 @@ void WeActEPaper2P9In3C::setup() {
   setup_pins_();
   delay(20);
 
-  // --- FIX: initialize display buffer to white ---
-  // Buffer is split into B/W and Red parts, both must be clean
+  // Correct buffer initialization for ESPHome 2026.x BWR semantics
   if (this->buffer_ != nullptr) {
-    memset(this->buffer_, 0xFF, this->get_buffer_length_());
+    memset(this->buffer_, 0x00, this->get_buffer_length_());
   }
 
   this->send_reset_();
-  // as a one-off delay this is not worth working around.
   delay(100);  // NOLINT
   this->wait_until_idle_();
+
   this->command(SW_RESET);
   this->wait_until_idle_();
 
@@ -114,57 +113,112 @@ void WeActEPaper2P9In3C::set_window_(int t, int b) {
   SEND(buffer);
 }
 
-// send the buffer starting on line `top`, up to line `bottom`.
 void WeActEPaper2P9In3C::write_buffer_(int top, int bottom) {
   auto width_bytes = this->get_width_internal() / 8u;
   auto offset = top * width_bytes;
   auto length = (bottom - top) * width_bytes;
+  auto red_offset = this->get_buffer_length_() / 2u;
 
   this->wait_until_idle_();
   this->set_window_(top, bottom);
 
+  // RED plane first
+  this->command(WRITE_COLOR);
+  this->start_data_();
+  this->write_array(this->buffer_ + offset + red_offset, length);
+  this->end_data_();
+
+  // BLACK plane second
   this->command(WRITE_BLACK);
   this->start_data_();
   this->write_array(this->buffer_ + offset, length);
   this->end_data_();
-
-  offset += this->get_buffer_length_() / 2u;
-  this->command(WRITE_COLOR);
-  this->start_data_();
-  this->write_array(this->buffer_ + offset, length);
-  this->end_data_();
 }
 
+// // send the buffer starting on line `top`, up to line `bottom`.
+// void WeActEPaper2P9In3C::write_buffer_(int top, int bottom) {
+//   auto width_bytes = this->get_width_internal() / 8u;
+//   auto offset = top * width_bytes;
+//   auto length = (bottom - top) * width_bytes;
+
+//   this->wait_until_idle_();
+//   this->set_window_(top, bottom);
+
+//   this->command(WRITE_BLACK);
+//   this->start_data_();
+//   this->write_array(this->buffer_ + offset, length);
+//   this->end_data_();
+
+//   offset += this->get_buffer_length_() / 2u;
+//   this->command(WRITE_COLOR);
+//   this->start_data_();
+//   this->write_array(this->buffer_ + offset, length);
+//   this->end_data_();
+// }
+
 void HOT WeActEPaper2P9In3C::draw_absolute_pixel_internal(int x, int y, Color color) {
-  if (x >= this->get_width_internal() || y >= this->get_height_internal() || x < 0 || y < 0)
+  if (x < 0 || y < 0 || x >= this->get_width_internal() || y >= this->get_height_internal())
     return;
 
   const uint32_t pos = (x + y * this->get_width_internal()) / 8u;
-  const uint8_t subpos = 0x80 >> (x & 0x07);
+  const uint8_t bit = 0x80 >> (x & 0x07);
+  const uint32_t red_offset = this->get_buffer_length_() / 2u;
 
-  // flip logic
-  if (color == display::COLOR_OFF) {
-    this->buffer_[pos] |= subpos;
+  // BLACK plane: 0 = white, 1 = black
+  if (color == display::COLOR_ON) {
+    this->buffer_[pos] |= bit;  // black
   } else {
-    this->buffer_[pos] &= ~subpos;
+    this->buffer_[pos] &= ~bit;  // white
   }
 
-  // draw red pixels only if the color contains red only
-  const uint32_t buf_half_len = this->get_buffer_length_() / 2u;
-  if (((color.red > 0) && (color.green == 0) && (color.blue == 0))) {
-    this->buffer_[pos + buf_half_len] |= subpos;
+  // RED plane: 1 = red pixel
+  if (color.red > 0 && color.green == 0 && color.blue == 0) {
+    this->buffer_[pos + red_offset] |= bit;
   } else {
-    this->buffer_[pos + buf_half_len] &= ~subpos;
+    this->buffer_[pos + red_offset] &= ~bit;
   }
 }
+
+// void HOT WeActEPaper2P9In3C::draw_absolute_pixel_internal(int x, int y, Color color) {
+//   if (x >= this->get_width_internal() || y >= this->get_height_internal() || x < 0 || y < 0)
+//     return;
+
+//   const uint32_t pos = (x + y * this->get_width_internal()) / 8u;
+//   const uint8_t subpos = 0x80 >> (x & 0x07);
+
+//   // flip logic
+//   if (color == display::COLOR_OFF) {
+//     this->buffer_[pos] |= subpos;
+//   } else {
+//     this->buffer_[pos] &= ~subpos;
+//   }
+
+//   // draw red pixels only if the color contains red only
+//   const uint32_t buf_half_len = this->get_buffer_length_() / 2u;
+//   if (((color.red > 0) && (color.green == 0) && (color.blue == 0))) {
+//     this->buffer_[pos + buf_half_len] |= subpos;
+//   } else {
+//     this->buffer_[pos + buf_half_len] &= ~subpos;
+//   }
+// }
 
 void WeActEPaper2P9In3C::full_update_() {
   ESP_LOGI(TAG, "Performing full e-paper update.");
+
   this->write_buffer_(0, this->get_height_internal());
   SEND(UPDATE_FULL);
-  this->command(ACTIVATE);  // don't wait here
+  this->command(ACTIVATE);
+  this->wait_until_idle_();
+
   this->is_busy_ = false;
 }
+// void WeActEPaper2P9In3C::full_update_() {
+//   ESP_LOGI(TAG, "Performing full e-paper update.");
+//   this->write_buffer_(0, this->get_height_internal());
+//   SEND(UPDATE_FULL);
+//   this->command(ACTIVATE);  // don't wait here
+//   this->is_busy_ = false;
+// }
 
 void WeActEPaper2P9In3C::display() {
   // Guard: skip first display call during boot
