@@ -1109,6 +1109,7 @@ class WeActEPaper2P9In3C : public WaveshareEPaperBWR {
   void deep_sleep() override;
 
   void setup() override;
+  void loop() override;
   void initialize() override;
 
  protected:
