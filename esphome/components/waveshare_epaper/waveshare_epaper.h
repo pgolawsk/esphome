@@ -1126,6 +1126,9 @@ class WeActEPaper2P9In3C : public WaveshareEPaperBWR {
   uint32_t full_update_every_{0};
   uint32_t at_update_{0};
   bool is_busy_{false};
+
+  // Guard to skip first display() call during boot
+  bool first_display_{true};
 };
 }  // namespace waveshare_epaper
 }  // namespace esphome
