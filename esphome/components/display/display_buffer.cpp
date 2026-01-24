@@ -17,7 +17,7 @@ void DisplayBuffer::init_internal_(uint32_t buffer_length) {
     ESP_LOGE(TAG, "Could not allocate buffer for display!");
     return;
   }
-  memset(this->buffer_, 0, buffer_length);
+  // memset(this->buffer_, 0, buffer_length);
   this->clear();
 }
 
