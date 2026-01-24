@@ -61,27 +61,10 @@ void WeActEPaper2P9In3C::dump_config() {
 
 void WeActEPaper2P9In3C::setup() {
   setup_pins_();
-  delay(20);
 
-  // Correct buffer initialization for ESPHome 2026.x
   if (this->buffer_ != nullptr) {
     memset(this->buffer_, 0x00, this->get_buffer_length_());
   }
-
-  this->send_reset_();
-  delay(10);  // krótko, NIE czekamy na BUSY
-
-  this->command(SW_RESET);
-
-  // konfiguracja bez czekania
-  SEND(DRV_OUT_CTL);
-  SEND(DATA_ENTRY);
-  SEND(BORDER_FULL);
-  SEND(TEMP_SENS);
-  SEND(DISPLAY_UPDATE);
-
-  // oddaj czas RTOS i WYJDŹ z setup()
-  yield();
 }
 
 void WeActEPaper2P9In3C::send_reset_() {
@@ -222,12 +205,27 @@ void WeActEPaper2P9In3C::full_update_() {
 // }
 
 void WeActEPaper2P9In3C::display() {
-  // allow system to mark boot as successful
-  if (millis() < 3000)
-    return;
+  if (!this->initialized_) {
+    this->initialized_ = true;
+
+    this->send_reset_();
+    delay(10);
+
+    this->command(SW_RESET);
+    this->wait_until_idle_();
+
+    SEND(DRV_OUT_CTL);
+    SEND(DATA_ENTRY);
+    SEND(BORDER_FULL);
+    SEND(TEMP_SENS);
+    SEND(DISPLAY_UPDATE);
+
+    return;  // pierwszy display = tylko init
+  }
 
   if (this->is_busy_ || (this->busy_pin_ != nullptr && this->busy_pin_->digital_read()))
     return;
+
   this->is_busy_ = true;
   this->full_update_();
 }
