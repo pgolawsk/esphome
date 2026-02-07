@@ -8,11 +8,22 @@ namespace esphome::epaper_spi {
 
 static constexpr const char *const TAG = "epaper_spi.weact_3c";
 
+// General Commands
+static const uint8_t SW_RESET = 0x12;
+static const uint8_t ACTIVATE = 0x20;
+static const uint8_t WRITE_BLACK = 0x24;
+static const uint8_t WRITE_COLOR = 0x26;
+
+// Configuration commands
+static const uint8_t DATA_ENTRY[] = {0x11, 0x03};            // data entry mode
+static const uint8_t BORDER_FULL[] = {0x3C, 0x05};           // border waveform
+static const uint8_t TEMP_SENS[] = {0x18, 0x80};             // use internal temp sensor
+static const uint8_t DISPLAY_UPDATE[] = {0x21, 0x00, 0x80};  // display update control
+static const uint8_t UPDATE_FULL[] = {0x22, 0xF7};           // full update control
+
 EPaperWeAct3C::EPaperWeAct3C(const char *name, uint16_t width, uint16_t height, const uint8_t *init_sequence,
                              size_t init_sequence_length, DisplayType display_type)
-    : EPaperBase(name, width, height, init_sequence, init_sequence_length, display_type) {
-  // For 3-color display, we need a second buffer for the red channel
-}
+    : EPaperBase(name, width, height, init_sequence, init_sequence_length, display_type) {}
 
 EPaperWeAct3C::~EPaperWeAct3C() { delete[] this->red_buffer_; }
 
@@ -54,46 +65,28 @@ bool EPaperWeAct3C::initialise(bool partial) {
 
   // Send initialization sequence for SSD1680
   // 1. Software Reset
-  this->command(0x12);  // SWReset
+  this->command(SW_RESET);
   delay(10);
 
   // Wait for busy to go low
   this->wait_for_idle_(false);
 
-  // 2. Booster Turn-on (command 0x18 with data 0x87)
-  this->cmd_data(0x18, {0x87});
+  // 2. Driver Output Control
+  const uint8_t drv_out_ctl[] = {0x01, (uint8_t) ((this->height_ - 1) & 0xFF),
+                                 (uint8_t) (((this->height_ - 1) >> 8) & 0xFF), 0x00};
+  this->cmd_data(0x01, drv_out_ctl, sizeof(drv_out_ctl));
 
-  // 3. Display Update Control (command 0x21 with data 0x00)
-  this->cmd_data(0x21, {0x00});
+  // 3. Data Entry Mode
+  this->cmd_data(0x11, DATA_ENTRY, sizeof(DATA_ENTRY));
 
-  // 4. Temperature sensor selection (internal) - command 0x4C
-  this->cmd_data(0x4C, {0x00});
+  // 4. Border Setting
+  this->cmd_data(0x3C, BORDER_FULL, sizeof(BORDER_FULL));
 
-  // 5. Set border - command 0x3C
-  this->cmd_data(0x3C, {0x05});  // Border setting
+  // 5. Temperature Sensor
+  this->cmd_data(0x18, TEMP_SENS, sizeof(TEMP_SENS));
 
-  // 6. Set display size and address
-  // X address range: 0 to width-1 (in bytes, so width/8-1)
-  this->cmd_data(0x44, {0x00, (uint8_t) ((this->width_ / 8) - 1)});  // Set RAM X address
-
-  // Y address range: 0 to height-1
-  this->cmd_data(0x45, {0x00, 0x00, 0x00, (uint8_t) (this->height_ - 1)});  // Set RAM Y address
-
-  // Set RAM X address counter
-  this->cmd_data(0x4E, {0x00});
-
-  // Set RAM Y address counter
-  this->cmd_data(0x4F, {0x00, 0x00});
-
-  // 7. Display Update Control 1 (command 0x21)
-  this->cmd_data(0x21, {0x40, 0x00});  // Enable clock signal
-
-  // 8. Master Activation
-  this->command(0x20);  // Master Activation
-  this->wait_for_idle_(false);
-
-  // Clear both buffers
-  this->clear();
+  // 6. Display Update Control
+  this->cmd_data(0x21, DISPLAY_UPDATE, sizeof(DISPLAY_UPDATE));
 
   return true;
 }
@@ -106,16 +99,23 @@ void HOT EPaperWeAct3C::draw_pixel_at(int x, int y, Color color) {
   const uint8_t bit_position = x % 8;
   const uint8_t pixel_bit = 0x80 >> bit_position;
 
-  if (color.is_on()) {
-    // Black pixel - set bit in main buffer, clear in red buffer
-    this->buffer_[byte_position] |= pixel_bit;
-    this->red_buffer_[byte_position] &= ~pixel_bit;
+  // Detect red pixels (r>0, g=0, b=0)
+  bool is_red = (color.red > 0) && (color.green == 0) && (color.blue == 0);
+
+  // BLACK PLANE: 0=Black, 1=White
+  // We want Black Ink if color is Active AND NOT Red
+  if (color.is_on() && !is_red) {
+    this->buffer_[byte_position] &= ~pixel_bit;  // Black Ink
   } else {
-    // For 3-color: OFF means white, so clear both
-    this->buffer_[byte_position] &= ~pixel_bit;
+    this->buffer_[byte_position] |= pixel_bit;  // White Paper
+  }
+
+  // RED PLANE: 1=Red, 0=None
+  if (is_red) {
+    this->red_buffer_[byte_position] |= pixel_bit;
+  } else {
     this->red_buffer_[byte_position] &= ~pixel_bit;
   }
-  // Note: base class handles x_low_, x_high_, y_low_, y_high_ updates
 }
 
 void EPaperWeAct3C::power_on() { ESP_LOGD(TAG, "power_on()"); }
@@ -127,24 +127,54 @@ void EPaperWeAct3C::refresh_screen(bool partial) { ESP_LOGI(TAG, "refresh_screen
 void EPaperWeAct3C::deep_sleep() {
   ESP_LOGI(TAG, "deep_sleep()");
 
-  // Enter deep sleep mode
-  this->command(0x10);           // Deep sleep mode
-  this->cmd_data(0x10, {0x01});  // Enter deep sleep
+  // Deep sleep mode
+  this->command(0x10);
+  this->cmd_data(0x10, {0x01});
 }
 
 bool HOT EPaperWeAct3C::transfer_data() {
   ESP_LOGI(TAG, "transfer_data() called");
 
-  // Transfer BLACK buffer (RAM 0x24) first
-  ESP_LOGD(TAG, "transferring black buffer (RAM 0x24)");
-  this->write_buffer_(nullptr, 0x24);  // nullptr means use base class buffer
+  this->wait_for_idle_(false);
 
-  // Transfer RED buffer (RAM 0x26)
+  // RAM Address Set
+  const uint8_t ram_x_range[] = {0x44, 0x00, (uint8_t) (this->width_ / 8u - 1)};
+  const uint8_t ram_y_range[] = {0x45, 0x00, 0x00, (uint8_t) (this->height_ - 1), (uint8_t) ((this->height_ - 1) >> 8)};
+  this->cmd_data(0x44, ram_x_range, sizeof(ram_x_range));
+  this->cmd_data(0x45, ram_y_range, sizeof(ram_y_range));
+
+  // Set RAM X counter
+  this->cmd_data(0x4E, {0x00});
+
+  // Set RAM Y counter
+  this->cmd_data(0x4F, {0x00, 0x00});
+
+  // Write RED buffer first (0x26)
   ESP_LOGD(TAG, "transferring red buffer (RAM 0x26)");
-  this->write_buffer_(this->red_buffer_, 0x26);
+  this->command(WRITE_COLOR);
+  this->dc_pin_->digital_write(true);
+  this->enable();
+  for (size_t i = 0; i < this->buffer_length_; i++) {
+    this->write_byte(this->red_buffer_[i]);
+  }
+  this->disable();
+
+  // Reset RAM Y counter before second buffer
+  this->cmd_data(0x4F, {0x00, 0x00});
+
+  // Write BLACK buffer second (0x24)
+  ESP_LOGD(TAG, "transferring black buffer (RAM 0x24)");
+  this->command(WRITE_BLACK);
+  this->dc_pin_->digital_write(true);
+  this->enable();
+  for (size_t i = 0; i < this->buffer_length_; i++) {
+    this->write_byte(this->buffer_[i]);
+  }
+  this->disable();
 
   // Trigger display update
-  this->update_display_();
+  this->cmd_data(0x22, UPDATE_FULL, sizeof(UPDATE_FULL));
+  this->command(ACTIVATE);
 
   return true;
 }
@@ -182,10 +212,10 @@ void EPaperWeAct3C::write_buffer_(const uint8_t *buffer, uint8_t ram_id) {
 
 void EPaperWeAct3C::update_display_() {
   // Display Update Control 2
-  this->cmd_data(0x22, {0xC4});  // Enable display, bypass mode
+  this->cmd_data(0x22, UPDATE_FULL, sizeof(UPDATE_FULL));  // Enable display
 
   // Master Activation
-  this->command(0x20);  // Master Activation
+  this->command(ACTIVATE);  // Master Activation
   this->wait_for_idle_(false);
 }
 
