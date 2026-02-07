@@ -192,4 +192,47 @@ void EPaperWeAct3C::update_display_() {
   this->wait_for_idle_(false);
 }
 
+void EPaperWeAct3C::set_state_(EPaperState state, uint16_t delay) {
+  // Override to skip waiting for busy pin in POWER_ON and REFRESH_SCREEN states
+  // The base class waits for idle when state > SHOULD_WAIT, but we manage this manually
+  ESP_LOGV(TAG, "set_state_: %s -> %s", this->epaper_state_to_string_(),
+           state == EPaperState::POWER_ON         ? "POWER_ON"
+           : state == EPaperState::REFRESH_SCREEN ? "REFRESH_SCREEN"
+           : state == EPaperState::POWER_OFF      ? "POWER_OFF"
+           : state == EPaperState::DEEP_SLEEP     ? "DEEP_SLEEP"
+           : state == EPaperState::IDLE           ? "IDLE"
+           : state == EPaperState::TRANSFER_DATA  ? "TRANSFER_DATA"
+           : state == EPaperState::INITIALISE     ? "INITIALISE"
+           : state == EPaperState::RESET          ? "RESET"
+                                                  : "UNKNOWN");
+
+  this->state_ = state;
+  // For POWER_ON and REFRESH_SCREEN, don't wait for busy pin - we handle it manually
+  if (state == EPaperState::POWER_ON || state == EPaperState::REFRESH_SCREEN || state == EPaperState::POWER_OFF ||
+      state == EPaperState::DEEP_SLEEP || state == EPaperState::IDLE) {
+    this->wait_for_idle_(false);
+  } else {
+    this->wait_for_idle_(state > EPaperState::SHOULD_WAIT);
+  }
+  // allow subclasses to nominate delays
+  if (delay == 0)
+    delay = this->next_delay_;
+  this->next_delay_ = 0;
+  this->delay_until_ = millis() + delay;
+  ESP_LOGV(TAG, "Enter state %s, delay %u, wait_for_idle=%s",
+           state == EPaperState::POWER_ON         ? "POWER_ON"
+           : state == EPaperState::REFRESH_SCREEN ? "REFRESH_SCREEN"
+           : state == EPaperState::POWER_OFF      ? "POWER_OFF"
+           : state == EPaperState::DEEP_SLEEP     ? "DEEP_SLEEP"
+           : state == EPaperState::IDLE           ? "IDLE"
+           : state == EPaperState::TRANSFER_DATA  ? "TRANSFER_DATA"
+           : state == EPaperState::INITIALISE     ? "INITIALISE"
+           : state == EPaperState::RESET          ? "RESET"
+                                                  : "UNKNOWN",
+           delay, TRUEFALSE(this->waiting_for_idle_));
+  if (state == EPaperState::IDLE) {
+    this->disable_loop();
+  }
+}
+
 }  // namespace esphome::epaper_spi

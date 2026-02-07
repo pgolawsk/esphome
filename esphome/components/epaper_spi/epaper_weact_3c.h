@@ -27,6 +27,9 @@ class EPaperWeAct3C : public EPaperBase {
   void deep_sleep() override;
   bool HOT transfer_data() override;
 
+  // Override to skip waiting for busy pin in certain states
+  void set_state_(EPaperState state, uint16_t delay = 0) override;
+
  private:
   // No separate red buffer - red is stored in second half of main buffer
   size_t get_red_offset_() const { return this->buffer_length_ / 2; }
