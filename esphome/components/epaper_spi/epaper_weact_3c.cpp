@@ -30,8 +30,6 @@ EPaperWeAct3C::EPaperWeAct3C(const char *name, uint16_t width, uint16_t height, 
   this->buffer_length_ = this->row_width_ * this->height_ * 2;
 }
 
-EPaperWeAct3C::~EPaperWeAct3C() = default;
-
 void EPaperWeAct3C::fill(Color color) {
   // Let base class handle the main buffer (first half)
   EPaperBase::fill(color);
