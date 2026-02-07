@@ -13,7 +13,7 @@ class EPaperWeAct3C : public EPaperBase {
  public:
   EPaperWeAct3C(const char *name, uint16_t width, uint16_t height, const uint8_t *init_sequence = nullptr,
                 size_t init_sequence_length = 0, DisplayType display_type = DISPLAY_TYPE_BINARY);
-  ~EPaperWeAct3C();
+  ~EPaperWeAct3C() = default;
 
   void fill(Color color) override;
   void clear() override;
@@ -29,9 +29,8 @@ class EPaperWeAct3C : public EPaperBase {
 
  private:
   // No separate red buffer - red is stored in second half of main buffer
-  static constexpr size_t get_red_offset_() { return EPaperBase::buffer_length_ / 2; }
+  size_t get_red_offset_() const { return this->buffer_length_ / 2; }
 
-  void write_buffer_(const uint8_t *buffer, uint8_t ram_id);
   void update_display_();
 };
 
