@@ -132,8 +132,9 @@ void EPaperWeAct3C::refresh_screen(bool partial) {
   this->command(ACTIVATE);
 
   // Wait for refresh to complete (SSD1680 takes ~20 seconds)
+  // First wait for busy to go HIGH (refresh started), then LOW (refresh done)
   ESP_LOGI(TAG, "Waiting for display refresh to complete...");
-  this->wait_for_idle_(true);
+  this->wait_for_idle_(true);  // Wait for busy to go HIGH then LOW
   ESP_LOGI(TAG, "Display refresh complete!");
 }
 
