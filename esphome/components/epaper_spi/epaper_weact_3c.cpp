@@ -8,234 +8,185 @@ namespace esphome::epaper_spi {
 
 static constexpr const char *const TAG = "epaper_spi.weact_3c";
 
-// Color mapping: 0=Black, 1=White, 2=Red
-enum WeAct3CColor {
-  WEACT_BLACK = 0,
-  WEACT_WHITE = 1,
-  WEACT_RED = 2,
-};
-
-uint8_t EPaperWeAct3C::color_to_bwr(Color color) {
-  // Check for pure red (R > 0, G = 0, B = 0)
-  if (color.r > 0 && color.g == 0 && color.b == 0) {
-    return WEACT_RED;
-  }
-
-  // For other colors, determine if it's closer to black or white
-  // We use luminance threshold at the middle (382 = (255*3)/2)
-  if ((static_cast<int>(color.r) + color.g + color.b) > 382) {
-    return WEACT_WHITE;
-  }
-  return WEACT_BLACK;
+EPaperWeAct3C::EPaperWeAct3C(const char *name, uint16_t width, uint16_t height, const uint8_t *init_sequence,
+                             size_t init_sequence_length, DisplayType display_type)
+    : EPaperBase(name, width, height, init_sequence, init_sequence_length, display_type) {
+  // For 3-color display, we need a second buffer for the red channel
 }
+
+EPaperWeAct3C::~EPaperWeAct3C() { delete[] this->red_buffer_; }
 
 void EPaperWeAct3C::fill(Color color) {
-  // If clipping is active, fall back to base implementation
-  if (this->get_clipping().is_set()) {
-    EPaperBase::fill(color);
-    return;
+  // Let base class handle the main buffer
+  EPaperBase::fill(color);
+
+  // Also fill the red buffer
+  uint8_t fill_byte = color.is_on() ? 0xFF : 0x00;
+  if (this->red_buffer_) {
+    for (size_t i = 0; i < this->buffer_length_; i++) {
+      this->red_buffer_[i] = fill_byte;
+    }
   }
-
-  auto pixel_color = color_to_bwr(color);
-  uint8_t black_plane_byte, red_plane_byte;
-
-  // Black/White plane: WeAct displays use INVERTED logic: 1=Black, 0=White
-  // Red plane: 1=Red, 0=None
-  switch (pixel_color) {
-    case WEACT_BLACK:
-      black_plane_byte = 0xFF;  // All black (inverted: 1=black)
-      red_plane_byte = 0x00;    // No red
-      break;
-    case WEACT_WHITE:
-      black_plane_byte = 0x00;  // All white (inverted: 0=white)
-      red_plane_byte = 0x00;    // No red
-      break;
-    case WEACT_RED:
-      black_plane_byte = 0x00;  // White (inverted: 0=white, not black)
-      red_plane_byte = 0xFF;    // All red
-      break;
-    default:
-      black_plane_byte = 0x00;  // Default to white (inverted)
-      red_plane_byte = 0x00;
-      break;
-  }
-
-  // Fill both planes
-  // First half of buffer is Black/White plane, second half is Red plane
-  for (size_t i = 0; i < this->plane_size_; i++) {
-    this->buffer_[i] = black_plane_byte;
-    this->buffer_[i + this->plane_size_] = red_plane_byte;
-  }
-
-  this->x_high_ = this->width_;
-  this->y_high_ = this->height_;
-  this->x_low_ = 0;
-  this->y_low_ = 0;
 }
 
-void EPaperWeAct3C::clear() {
-  // Clear to white (all white, no red)
-  this->fill(COLOR_ON);
-}
+void EPaperWeAct3C::clear() { this->fill(COLOR_OFF); }
 
 bool EPaperWeAct3C::initialise(bool partial) {
-  EPaperBase::initialise(partial);
-  // Additional init if needed for partial updates
-  delayMicroseconds(200);  // Ensure controller processes init sequence
+  ESP_LOGI(TAG, "initialise(partial=%d)", partial);
+
+  // Initialize buffer first (this sets buffer_length_ and clears buffer)
+  if (!this->init_buffer_(this->buffer_length_)) {
+    ESP_LOGW(TAG, "init_buffer_ failed");
+    return false;
+  }
+
+  ESP_LOGI(TAG, "width=%u, height=%u, buffer_length=%zu", this->width_, this->height_, this->buffer_length_);
+
+  // Allocate red buffer
+  this->red_buffer_ = new uint8_t[this->buffer_length_];
+  for (size_t i = 0; i < this->buffer_length_; i++) {
+    this->red_buffer_[i] = 0x00;  // Start with all red off
+  }
+
+  // Reset the controller
+  this->reset();
+  delay(10);
+
+  // Send initialization sequence for SSD1680
+  // 1. Software Reset
+  this->command(0x12);  // SWReset
+  delay(10);
+
+  // Wait for busy to go low
+  this->wait_for_idle_(false);
+
+  // 2. Booster Turn-on (command 0x18 with data 0x87)
+  this->cmd_data(0x18, {0x87});
+
+  // 3. Display Update Control (command 0x21 with data 0x00)
+  this->cmd_data(0x21, {0x00});
+
+  // 4. Temperature sensor selection (internal) - command 0x4C
+  this->cmd_data(0x4C, {0x00});
+
+  // 5. Set border - command 0x3C
+  this->cmd_data(0x3C, {0x05});  // Border setting
+
+  // 6. Set display size and address
+  // X address range: 0 to width-1 (in bytes, so width/8-1)
+  this->cmd_data(0x44, {0x00, (uint8_t) ((this->width_ / 8) - 1)});  // Set RAM X address
+
+  // Y address range: 0 to height-1
+  this->cmd_data(0x45, {0x00, 0x00, 0x00, (uint8_t) (this->height_ - 1)});  // Set RAM Y address
+
+  // Set RAM X address counter
+  this->cmd_data(0x4E, {0x00});
+
+  // Set RAM Y address counter
+  this->cmd_data(0x4F, {0x00, 0x00});
+
+  // 7. Display Update Control 1 (command 0x21)
+  this->cmd_data(0x21, {0x40, 0x00});  // Enable clock signal
+
+  // 8. Master Activation
+  this->command(0x20);  // Master Activation
+  this->wait_for_idle_(false);
+
+  // Clear both buffers
+  this->clear();
+
   return true;
-}
-
-void EPaperWeAct3C::set_window() {
-  // Round to byte boundaries
-  this->x_low_ &= ~7;
-  this->x_high_ += 7;
-  this->x_high_ &= ~7;
-
-  uint16_t x_start = this->x_low_ / 8;
-  uint16_t x_end = (this->x_high_ - 1) / 8;
-
-  // Set RAM X range (0x44) and position (0x4E)
-  this->cmd_data(0x44, {(uint8_t) x_start, (uint8_t) x_end});
-  this->cmd_data(0x4E, {(uint8_t) x_start});
-
-  // Set RAM Y range (0x45) and position (0x4F)
-  this->cmd_data(0x45, {(uint8_t) this->y_low_, (uint8_t) (this->y_low_ / 256), (uint8_t) (this->y_high_ - 1),
-                        (uint8_t) ((this->y_high_ - 1) / 256)});
-  this->cmd_data(0x4F, {(uint8_t) this->y_low_, (uint8_t) (this->y_low_ / 256)});
-
-  ESP_LOGV(TAG, "Set window X: %u-%u, Y: %u-%u", this->x_low_, this->x_high_, this->y_low_, this->y_high_);
-  delayMicroseconds(100);  // Allow controller to process window settings
 }
 
 void HOT EPaperWeAct3C::draw_pixel_at(int x, int y, Color color) {
   if (!this->rotate_coordinates_(x, y))
     return;
 
-  auto pixel_color = color_to_bwr(color);
-  const uint32_t pos = (x + y * this->get_width_internal()) / 8u;
-  const uint8_t bit = 0x80 >> (x & 0x07);
+  const size_t byte_position = y * this->row_width_ + x / 8;
+  const uint8_t bit_position = x % 8;
+  const uint8_t pixel_bit = 0x80 >> bit_position;
 
-  // Black/White plane (first half of buffer)
-  // WeAct displays use INVERTED logic: 1=Black, 0=White
-  if (pixel_color == WEACT_BLACK) {
-    this->buffer_[pos] |= bit;  // 1 = Black (inverted)
+  if (color.is_on()) {
+    // Black pixel - set bit in main buffer, clear in red buffer
+    this->buffer_[byte_position] |= pixel_bit;
+    this->red_buffer_[byte_position] &= ~pixel_bit;
   } else {
-    this->buffer_[pos] &= ~bit;  // 0 = White (inverted, for both white and red)
+    // For 3-color: OFF means white, so clear both
+    this->buffer_[byte_position] &= ~pixel_bit;
+    this->red_buffer_[byte_position] &= ~pixel_bit;
   }
-
-  // Red plane (second half of buffer)
-  // 1=Red, 0=None
-  if (pixel_color == WEACT_RED) {
-    this->buffer_[pos + this->plane_size_] |= bit;
-  } else {
-    this->buffer_[pos + this->plane_size_] &= ~bit;
-  }
+  // Note: base class handles x_low_, x_high_, y_low_, y_high_ updates
 }
 
-void EPaperWeAct3C::power_on() {
-  ESP_LOGV(TAG, "Power on");
-  // Empty - display is powered on during initialization
-}
+void EPaperWeAct3C::power_on() { ESP_LOGD(TAG, "power_on()"); }
 
-void EPaperWeAct3C::power_off() {
-  ESP_LOGV(TAG, "Power off");
-  // Empty - no power off sequence needed, avoids BUSY timeout
-}
+void EPaperWeAct3C::power_off() { ESP_LOGD(TAG, "power_off()"); }
 
-void EPaperWeAct3C::refresh_screen(bool partial) {
-  ESP_LOGV(TAG, "Refresh screen");
-  this->cmd_data(0x22, {0xF7});
-  delayMicroseconds(200);  // Delay after display update control
-  this->command(0x20);
-  delayMicroseconds(200);  // Delay after activate command
-  this->next_delay_ = 100;
-}
+void EPaperWeAct3C::refresh_screen(bool partial) { ESP_LOGI(TAG, "refresh_screen(partial=%d)", partial); }
 
 void EPaperWeAct3C::deep_sleep() {
-  ESP_LOGV(TAG, "Deep sleep");
-  this->cmd_data(0x10, {0x01});
+  ESP_LOGI(TAG, "deep_sleep()");
+
+  // Enter deep sleep mode
+  this->command(0x10);           // Deep sleep mode
+  this->cmd_data(0x10, {0x01});  // Enter deep sleep
 }
 
 bool HOT EPaperWeAct3C::transfer_data() {
-  const uint32_t start_time = App.get_loop_component_start_time();
+  ESP_LOGI(TAG, "transfer_data() called");
 
-  // First transfer: Black/White plane (command 0x24)
-  if (this->current_plane_ == 0) {
-    if (this->current_data_index_ == 0) {
-      ESP_LOGD(TAG, "Starting Black/White plane transfer");
-      this->set_window();  // Set window before sending data
-      this->command(0x24);
-      this->start_data_();  // Enter data mode ONCE for entire plane
+  // Transfer BLACK buffer (RAM 0x24) first
+  ESP_LOGD(TAG, "transferring black buffer (RAM 0x24)");
+  this->write_buffer_(nullptr, 0x24);  // nullptr means use base class buffer
+
+  // Transfer RED buffer (RAM 0x26)
+  ESP_LOGD(TAG, "transferring red buffer (RAM 0x26)");
+  this->write_buffer_(this->red_buffer_, 0x26);
+
+  // Trigger display update
+  this->update_display_();
+
+  return true;
+}
+
+void EPaperWeAct3C::write_buffer_(const uint8_t *buffer, uint8_t ram_id) {
+  // RAM Address Set for X and Y
+  this->cmd_data(0x44, {0x00, (uint8_t) ((this->width_ / 8) - 1)});  // Set RAM X address
+
+  this->cmd_data(0x45, {0x00, 0x00, 0x00, (uint8_t) (this->height_ - 1)});  // Set RAM Y address
+
+  this->cmd_data(0x4E, {0x00});        // Set RAM X counter
+  this->cmd_data(0x4F, {0x00, 0x00});  // Set RAM Y counter
+
+  // Start data transmission - send RAM ID as command
+  this->command(ram_id);  // RAM access command (0x24 or 0x26)
+
+  // Write the buffer byte by byte
+  this->dc_pin_->digital_write(true);
+  this->enable();
+
+  if (buffer == nullptr) {
+    // Use base class SplitBuffer
+    for (size_t i = 0; i < this->buffer_length_; i++) {
+      this->write_byte(this->buffer_[i]);
     }
-
-    size_t buf_idx = 0;
-    uint8_t bytes_to_send[MAX_TRANSFER_SIZE];
-    while (this->current_data_index_ < this->plane_size_) {
-      bytes_to_send[buf_idx++] = this->buffer_[this->current_data_index_++];
-
-      if (buf_idx == sizeof(bytes_to_send)) {
-        this->write_array(bytes_to_send, buf_idx);
-        buf_idx = 0;
-
-        if (millis() - start_time > MAX_TRANSFER_TIME) {
-          this->disable();
-          return false;  // Not done yet
-        }
-      }
+  } else {
+    // Use our own contiguous buffer
+    for (size_t i = 0; i < this->buffer_length_; i++) {
+      this->write_byte(buffer[i]);
     }
-
-    // Flush remaining bytes
-    if (buf_idx > 0) {
-      this->write_array(bytes_to_send, buf_idx);
-    }
-
-    this->disable();  // Exit data mode after plane complete
-
-    // Move to red plane
-    this->current_plane_ = 1;
-    this->current_data_index_ = 0;
-    ESP_LOGD(TAG, "Black/White plane complete, moving to Red plane");
-    return false;  // Come back next loop for red plane
   }
 
-  // Second transfer: Red plane (command 0x26)
-  if (this->current_plane_ == 1) {
-    if (this->current_data_index_ == 0) {
-      this->command(0x26);
-      this->start_data_();  // Enter data mode ONCE for entire plane
-    }
+  this->disable();
+}
 
-    size_t buf_idx = 0;
-    uint8_t bytes_to_send[MAX_TRANSFER_SIZE];
-    while (this->current_data_index_ < this->plane_size_) {
-      bytes_to_send[buf_idx++] = this->buffer_[this->plane_size_ + this->current_data_index_++];
+void EPaperWeAct3C::update_display_() {
+  // Display Update Control 2
+  this->cmd_data(0x22, {0xC4});  // Enable display, bypass mode
 
-      if (buf_idx == sizeof(bytes_to_send)) {
-        this->write_array(bytes_to_send, buf_idx);
-        buf_idx = 0;
-
-        if (millis() - start_time > MAX_TRANSFER_TIME) {
-          this->disable();
-          return false;  // Not done yet
-        }
-      }
-    }
-
-    // Flush remaining bytes
-    if (buf_idx > 0) {
-      this->write_array(bytes_to_send, buf_idx);
-    }
-
-    this->disable();  // Exit data mode after plane complete
-
-    // Reset for next update
-    this->current_plane_ = 0;
-    this->current_data_index_ = 0;
-    ESP_LOGD(TAG, "Red plane complete");
-    return true;  // Both planes done
-  }
-
-  return false;  // Should never reach here
+  // Master Activation
+  this->command(0x20);  // Master Activation
+  this->wait_for_idle_(false);
 }
 
 }  // namespace esphome::epaper_spi
