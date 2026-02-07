@@ -1,6 +1,7 @@
 #include "epaper_weact_3c.h"
 
 #include <algorithm>
+#include <cstring>
 
 #include "esphome/core/log.h"
 
@@ -25,21 +26,21 @@ EPaperWeAct3C::EPaperWeAct3C(const char *name, uint16_t width, uint16_t height, 
                              size_t init_sequence_length, DisplayType display_type)
     : EPaperBase(name, width, height, init_sequence, init_sequence_length, display_type) {
   // buffer_length_ must be set AFTER base class constructor runs (which sets row_width_)
-  this->buffer_length_ = this->row_width_ * this->height_;
+  // For 3-color displays, we need DOUBLE buffer length (black + red planes)
+  this->buffer_length_ = this->row_width_ * this->height_ * 2;
 }
 
-EPaperWeAct3C::~EPaperWeAct3C() { delete[] this->red_buffer_; }
+EPaperWeAct3C::~EPaperWeAct3C() = default;
 
 void EPaperWeAct3C::fill(Color color) {
-  // Let base class handle the main buffer
+  // Let base class handle the main buffer (first half)
   EPaperBase::fill(color);
 
-  // Also fill the red buffer
+  // Clear red buffer (second half of main buffer)
+  const size_t half_buffer = this->buffer_length_ / 2;
   uint8_t fill_byte = color.is_on() ? 0xFF : 0x00;
-  if (this->red_buffer_) {
-    for (size_t i = 0; i < this->buffer_length_; i++) {
-      this->red_buffer_[i] = fill_byte;
-    }
+  for (size_t i = half_buffer; i < this->buffer_length_; i++) {
+    this->buffer_[i] = fill_byte;
   }
 }
 
@@ -47,12 +48,13 @@ void EPaperWeAct3C::clear() { this->fill(COLOR_OFF); }
 
 bool EPaperWeAct3C::initialise(bool partial) {
   ESP_LOGI(TAG, "initialise(partial=%d)", partial);
-  ESP_LOGI(TAG, "width=%u, height=%u, buffer_length=%zu", this->width_, this->height_, this->buffer_length_);
+  ESP_LOGI(TAG, "width=%u, height=%u, buffer_length=%zu (black=%zu, red=%zu)", this->width_, this->height_,
+           this->buffer_length_, this->buffer_length_ / 2, this->buffer_length_ / 2);
 
-  // Allocate red buffer
-  this->red_buffer_ = new uint8_t[this->buffer_length_];
-  for (size_t i = 0; i < this->buffer_length_; i++) {
-    this->red_buffer_[i] = 0x00;  // Start with all red off
+  // Clear red buffer (second half of main buffer)
+  const size_t half_buffer = this->buffer_length_ / 2;
+  for (size_t i = half_buffer; i < this->buffer_length_; i++) {
+    this->buffer_[i] = 0x00;
   }
 
   // Reset the controller
@@ -95,6 +97,9 @@ void HOT EPaperWeAct3C::draw_pixel_at(int x, int y, Color color) {
   const uint8_t bit_position = x % 8;
   const uint8_t pixel_bit = 0x80 >> bit_position;
 
+  // Red data is in second half of buffer
+  const size_t red_offset = this->buffer_length_ / 2;
+
   // Detect red pixels (r>0, g=0, b=0)
   bool is_red = (color.red > 0) && (color.green == 0) && (color.blue == 0);
 
@@ -106,11 +111,11 @@ void HOT EPaperWeAct3C::draw_pixel_at(int x, int y, Color color) {
     this->buffer_[byte_position] |= pixel_bit;  // White Paper
   }
 
-  // RED PLANE: 1=Red, 0=None
+  // RED PLANE: 1=Red, 0=None (stored in second half of buffer)
   if (is_red) {
-    this->red_buffer_[byte_position] |= pixel_bit;
+    this->buffer_[byte_position + red_offset] |= pixel_bit;
   } else {
-    this->red_buffer_[byte_position] &= ~pixel_bit;
+    this->buffer_[byte_position + red_offset] &= ~pixel_bit;
   }
 }
 
@@ -133,6 +138,8 @@ bool HOT EPaperWeAct3C::transfer_data() {
 
   this->wait_for_idle_(false);
 
+  const size_t half_buffer = this->buffer_length_ / 2;
+
   // RAM Address Set
   const uint8_t ram_x_range[] = {0x44, 0x00, (uint8_t) (this->width_ / 8u - 1)};
   const uint8_t ram_y_range[] = {0x45, 0x00, 0x00, (uint8_t) (this->height_ - 1), (uint8_t) ((this->height_ - 1) >> 8)};
@@ -145,25 +152,25 @@ bool HOT EPaperWeAct3C::transfer_data() {
   // Set RAM Y counter
   this->cmd_data(0x4F, {0x00, 0x00});
 
-  // Write RED buffer first (0x26)
-  ESP_LOGD(TAG, "transferring red buffer (RAM 0x26)");
+  // Write RED buffer first (0x26) - second half of main buffer
+  ESP_LOGD(TAG, "transferring red buffer (RAM 0x26), offset=%zu, len=%zu", half_buffer, half_buffer);
   this->command(WRITE_COLOR);
   this->dc_pin_->digital_write(true);
   this->enable();
-  for (size_t i = 0; i < this->buffer_length_; i++) {
-    this->write_byte(this->red_buffer_[i]);
+  for (size_t i = half_buffer; i < this->buffer_length_; i++) {
+    this->write_byte(this->buffer_[i]);
   }
   this->disable();
 
   // Reset RAM Y counter before second buffer
   this->cmd_data(0x4F, {0x00, 0x00});
 
-  // Write BLACK buffer second (0x24)
-  ESP_LOGD(TAG, "transferring black buffer (RAM 0x24)");
+  // Write BLACK buffer second (0x24) - first half of main buffer
+  ESP_LOGD(TAG, "transferring black buffer (RAM 0x24), len=%zu", half_buffer);
   this->command(WRITE_BLACK);
   this->dc_pin_->digital_write(true);
   this->enable();
-  for (size_t i = 0; i < this->buffer_length_; i++) {
+  for (size_t i = 0; i < half_buffer; i++) {
     this->write_byte(this->buffer_[i]);
   }
   this->disable();
@@ -173,37 +180,6 @@ bool HOT EPaperWeAct3C::transfer_data() {
   this->command(ACTIVATE);
 
   return true;
-}
-
-void EPaperWeAct3C::write_buffer_(const uint8_t *buffer, uint8_t ram_id) {
-  // RAM Address Set for X and Y
-  this->cmd_data(0x44, {0x00, (uint8_t) ((this->width_ / 8) - 1)});  // Set RAM X address
-
-  this->cmd_data(0x45, {0x00, 0x00, 0x00, (uint8_t) (this->height_ - 1)});  // Set RAM Y address
-
-  this->cmd_data(0x4E, {0x00});        // Set RAM X counter
-  this->cmd_data(0x4F, {0x00, 0x00});  // Set RAM Y counter
-
-  // Start data transmission - send RAM ID as command
-  this->command(ram_id);  // RAM access command (0x24 or 0x26)
-
-  // Write the buffer byte by byte
-  this->dc_pin_->digital_write(true);
-  this->enable();
-
-  if (buffer == nullptr) {
-    // Use base class SplitBuffer
-    for (size_t i = 0; i < this->buffer_length_; i++) {
-      this->write_byte(this->buffer_[i]);
-    }
-  } else {
-    // Use our own contiguous buffer
-    for (size_t i = 0; i < this->buffer_length_; i++) {
-      this->write_byte(buffer[i]);
-    }
-  }
-
-  this->disable();
 }
 
 void EPaperWeAct3C::update_display_() {

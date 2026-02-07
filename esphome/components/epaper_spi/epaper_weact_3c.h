@@ -28,7 +28,8 @@ class EPaperWeAct3C : public EPaperBase {
   bool HOT transfer_data() override;
 
  private:
-  uint8_t *red_buffer_{nullptr};  // Red channel buffer (RAM 0x26)
+  // No separate red buffer - red is stored in second half of main buffer
+  static constexpr size_t get_red_offset_() { return EPaperBase::buffer_length_ / 2; }
 
   void write_buffer_(const uint8_t *buffer, uint8_t ram_id);
   void update_display_();
