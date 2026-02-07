@@ -117,7 +117,10 @@ void HOT EPaperWeAct3C::draw_pixel_at(int x, int y, Color color) {
   }
 }
 
-void EPaperWeAct3C::power_on() { ESP_LOGD(TAG, "power_on()"); }
+void EPaperWeAct3C::power_on() {
+  ESP_LOGD(TAG, "power_on() - busy_pin: %s",
+           this->busy_pin_ ? (this->busy_pin_->digital_read() ? "HIGH" : "LOW") : "NULL");
+}
 
 void EPaperWeAct3C::power_off() { ESP_LOGD(TAG, "power_off()"); }
 
