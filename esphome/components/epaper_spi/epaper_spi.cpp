@@ -99,7 +99,7 @@ bool EPaperBase::reset() {
 
 void EPaperBase::update() {
   if (this->state_ != EPaperState::IDLE) {
-    ESP_LOGE(TAG, "Display already in state %s", epaper_state_to_string_());
+    ESP_LOGW(TAG, "Display already in state %s, skipping update", epaper_state_to_string_());
     return;
   }
   this->set_state_(EPaperState::UPDATE);
@@ -174,8 +174,12 @@ void EPaperBase::process_state_() {
       }
       break;
     case EPaperState::UPDATE:
+      ESP_LOGD(TAG, "Calling do_update_() to render content");
       this->do_update_();  // Calls ESPHome (current page) lambda
-      if (this->x_high_ < this->x_low_ || this->y_high_ < this->y_low_) {
+      ESP_LOGD(TAG, "do_update_() complete. Dirty region: X=%u-%u, Y=%u-%u", this->x_low_, this->x_high_, this->y_low_,
+               this->y_high_);
+      if (this->x_high_ < this->x_low_ || this->y_high_ < this->y_high_) {
+        ESP_LOGW(TAG, "No dirty region, skipping update");
         this->set_state_(EPaperState::IDLE);
         return;
       }
