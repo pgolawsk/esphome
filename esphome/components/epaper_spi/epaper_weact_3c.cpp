@@ -130,6 +130,11 @@ void EPaperWeAct3C::refresh_screen(bool partial) {
   // Master Activation - triggers the display refresh
   this->cmd_data(0x22, UPDATE_FULL, sizeof(UPDATE_FULL));
   this->command(ACTIVATE);
+
+  // Wait for refresh to complete (SSD1680 takes ~20 seconds)
+  ESP_LOGI(TAG, "Waiting for display refresh to complete...");
+  this->wait_for_idle_(true);
+  ESP_LOGI(TAG, "Display refresh complete!");
 }
 
 void EPaperWeAct3C::deep_sleep() {
