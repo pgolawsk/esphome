@@ -148,7 +148,7 @@ class EPaperBase : public Display,
    */
   virtual void deep_sleep() = 0;
 
-  void set_state_(EPaperState state, uint16_t delay = 0);
+  virtual void set_state_(EPaperState state, uint16_t delay = 0);
 
   void start_data_();
 
