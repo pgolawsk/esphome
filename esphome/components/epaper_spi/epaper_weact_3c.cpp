@@ -44,13 +44,6 @@ void EPaperWeAct3C::clear() { this->fill(COLOR_OFF); }
 
 bool EPaperWeAct3C::initialise(bool partial) {
   ESP_LOGI(TAG, "initialise(partial=%d)", partial);
-
-  // Initialize buffer first (this sets buffer_length_ and clears buffer)
-  if (!this->init_buffer_(this->buffer_length_)) {
-    ESP_LOGW(TAG, "init_buffer_ failed");
-    return false;
-  }
-
   ESP_LOGI(TAG, "width=%u, height=%u, buffer_length=%zu", this->width_, this->height_, this->buffer_length_);
 
   // Allocate red buffer
