@@ -33,8 +33,6 @@ class EPaperWeAct3C : public EPaperBase {
  private:
   // No separate red buffer - red is stored in second half of main buffer
   size_t get_red_offset_() const { return this->buffer_length_ / 2; }
-
-  void update_display_();
 };
 
 }  // namespace esphome::epaper_spi

@@ -124,7 +124,13 @@ void EPaperWeAct3C::power_on() {
 
 void EPaperWeAct3C::power_off() { ESP_LOGD(TAG, "power_off()"); }
 
-void EPaperWeAct3C::refresh_screen(bool partial) { ESP_LOGI(TAG, "refresh_screen(partial=%d)", partial); }
+void EPaperWeAct3C::refresh_screen(bool partial) {
+  ESP_LOGI(TAG, "refresh_screen(partial=%d)", partial);
+
+  // Master Activation - triggers the display refresh
+  this->cmd_data(0x22, UPDATE_FULL, sizeof(UPDATE_FULL));
+  this->command(ACTIVATE);
+}
 
 void EPaperWeAct3C::deep_sleep() {
   ESP_LOGI(TAG, "deep_sleep()");
@@ -175,10 +181,6 @@ bool HOT EPaperWeAct3C::transfer_data() {
     this->write_byte(this->buffer_[i]);
   }
   this->disable();
-
-  // Trigger display update
-  this->cmd_data(0x22, UPDATE_FULL, sizeof(UPDATE_FULL));
-  this->command(ACTIVATE);
 
   return true;
 }
