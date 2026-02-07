@@ -23,7 +23,10 @@ static const uint8_t UPDATE_FULL[] = {0x22, 0xF7};           // full update cont
 
 EPaperWeAct3C::EPaperWeAct3C(const char *name, uint16_t width, uint16_t height, const uint8_t *init_sequence,
                              size_t init_sequence_length, DisplayType display_type)
-    : EPaperBase(name, width, height, init_sequence, init_sequence_length, display_type) {}
+    : EPaperBase(name, width, height, init_sequence, init_sequence_length, display_type) {
+  // buffer_length_ must be set AFTER base class constructor runs (which sets row_width_)
+  this->buffer_length_ = this->row_width_ * this->height_;
+}
 
 EPaperWeAct3C::~EPaperWeAct3C() { delete[] this->red_buffer_; }
 
