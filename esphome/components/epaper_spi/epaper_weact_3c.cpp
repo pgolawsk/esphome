@@ -185,15 +185,6 @@ bool HOT EPaperWeAct3C::transfer_data() {
   return true;
 }
 
-void EPaperWeAct3C::update_display_() {
-  // Display Update Control 2
-  this->cmd_data(0x22, UPDATE_FULL, sizeof(UPDATE_FULL));  // Enable display
-
-  // Master Activation
-  this->command(ACTIVATE);  // Master Activation
-  this->wait_for_idle_(false);
-}
-
 void EPaperWeAct3C::set_state_(EPaperState state, uint16_t delay) {
   // Override to skip waiting for busy pin in POWER_ON and REFRESH_SCREEN states
   // The base class waits for idle when state > SHOULD_WAIT, but we manage this manually
