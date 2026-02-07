@@ -131,39 +131,7 @@ void EPaperWeAct3C::refresh_screen(bool partial) {
   this->cmd_data(0x22, UPDATE_FULL, sizeof(UPDATE_FULL));
   this->command(ACTIVATE);
 
-  // Wait for refresh to complete (SSD1680 takes ~20 seconds)
-  // First check if busy pin goes HIGH (refresh started), then wait for LOW
-  uint32_t start = millis();
-  const uint32_t REFRESH_TIMEOUT = 20000;  // 20 seconds
-
-  // Wait for busy to go HIGH (refresh started)
-  ESP_LOGI(TAG, "Waiting for display refresh to start...");
-  while (this->busy_pin_ != nullptr && !this->busy_pin_->digital_read()) {
-    if (millis() - start > 1000) {
-      ESP_LOGW(TAG, "Busy pin didn't go HIGH within 1s, using timeout delay");
-      break;
-    }
-    delay(10);
-  }
-
-  // Wait for busy to go LOW (refresh complete)
-  ESP_LOGI(TAG, "Waiting for display refresh to complete...");
-  start = millis();
-  while (this->busy_pin_ != nullptr && this->busy_pin_->digital_read()) {
-    if (millis() - start > REFRESH_TIMEOUT) {
-      ESP_LOGW(TAG, "Timeout waiting for display refresh");
-      break;
-    }
-    delay(10);
-  }
-
-  // If busy pin is not connected, use fixed delay
-  if (this->busy_pin_ == nullptr) {
-    ESP_LOGI(TAG, "No busy pin configured, using fixed delay");
-    delay(REFRESH_TIMEOUT);
-  }
-
-  ESP_LOGI(TAG, "Display refresh complete!");
+  ESP_LOGI(TAG, "Display refresh initiated (busy pin monitoring skipped)");
 }
 
 void EPaperWeAct3C::deep_sleep() {
