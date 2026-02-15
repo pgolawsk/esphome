@@ -71,9 +71,13 @@ void FramPref::ensure_initialized_() {
     }
   }
 
+  if (!needs_clear) {
+    ESP_LOGD(TAG, "FRAM preferences pool restored successfully");
+  }
+
   if (needs_clear) {
     this->pool_cleared_ = true;
-    ESP_LOGI(TAG, "Clearing pool area...");
+    ESP_LOGD(TAG, "Clearing pool area...");
     // Clear the pool area by writing zeros
     for (uint32_t i = 0; i < this->pool_size_; i += 32) {
       uint8_t zeros[32] = {0};
