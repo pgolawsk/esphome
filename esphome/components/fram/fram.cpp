@@ -1,5 +1,6 @@
 #include "fram.h"
 #include "esphome/core/log.h"
+#include <vector>
 
 namespace esphome {
 namespace fram {
@@ -21,9 +22,10 @@ void Fram::dump_config() {
   if (this->size_bytes_ > 0) {
     ESP_LOGCONFIG(TAG, "  Size: %u bytes", this->size_bytes_);
   }
+  ESP_LOGCONFIG(TAG, "  Address width: %u bytes", this->address_width_);
 }
 
-bool Fram::is_connected() { return this->bus_->write(this->address_, nullptr, 0) == i2c::ERROR_OK; }
+bool Fram::is_connected() { return this->write(nullptr, 0) == i2c::ERROR_OK; }
 
 void Fram::write_bytes(uint32_t memaddr, const uint8_t *value, uint32_t len) {
   this->write_bytes_16(memaddr, value, len);
@@ -34,17 +36,24 @@ void Fram::read_bytes(uint32_t memaddr, uint8_t *value, uint32_t len) { this->re
 void Fram::write_bytes_16(uint32_t memaddr, const uint8_t *value, uint32_t len) {
   uint8_t memaddr_hi = (memaddr >> 8) & 0xFF;
   uint8_t memaddr_lo = memaddr & 0xFF;
-  this->bus_->write_bytes(this->address_, &memaddr_hi, 1, false);
-  this->bus_->write_bytes(this->address_, &memaddr_lo, 1, false);
-  this->bus_->write_bytes(this->address_, value, len);
+  // FRAM requires address and data in a single I2C write transaction
+  // Create a buffer with address prefix + data
+  std::vector<uint8_t> buffer;
+  buffer.reserve(2 + len);
+  buffer.push_back(memaddr_hi);
+  buffer.push_back(memaddr_lo);
+  for (uint32_t i = 0; i < len; i++) {
+    buffer.push_back(value[i]);
+  }
+  this->bus_->write_readv(this->address_, buffer.data(), buffer.size(), nullptr, 0);
 }
 
 void Fram::read_bytes_16(uint32_t memaddr, uint8_t *value, uint32_t len) {
   uint8_t memaddr_hi = (memaddr >> 8) & 0xFF;
   uint8_t memaddr_lo = memaddr & 0xFF;
-  this->bus_->write_bytes(this->address_, &memaddr_hi, 1, false);
-  this->bus_->write_bytes(this->address_, &memaddr_lo, 1, false);
-  this->bus_->read_bytes(this->address_, value, len);
+  // Write the 16-bit address, then read the data
+  uint8_t addr_buf[2] = {memaddr_hi, memaddr_lo};
+  this->bus_->write_readv(this->address_, addr_buf, 2, value, len);
 }
 
 }  // namespace fram

@@ -56,8 +56,13 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
 
   this->comp_->fram_->write_bytes(addr + 4, (uint8_t *) &len, 4);
   this->comp_->fram_->write_bytes(addr + 8, data, len);
-  uint32_t crc = crc32(data, len);
-  this->comp_->fram_->write_bytes(addr + 8 + len, (uint8_t *) &crc, 4);
+  // Use FNV-1a hash for data integrity (CRC32 not available in ESPHome)
+  uint32_t hash = FNV1_OFFSET_BASIS;
+  for (size_t i = 0; i < len; i++) {
+    hash ^= data[i];
+    hash *= FNV1_PRIME;
+  }
+  this->comp_->fram_->write_bytes(addr + 8 + len, (uint8_t *) &hash, 4);
   return true;
 }
 
@@ -79,9 +84,15 @@ bool FRAMPreferenceBackend::load(uint8_t *data, size_t len) {
   }
 
   this->comp_->fram_->read_bytes(addr + 8, data, len);
-  uint32_t crc_from_fram = 0;
-  this->comp_->fram_->read_bytes(addr + 8 + len, (uint8_t *) &crc_from_fram, 4);
-  return crc32(data, len) == crc_from_fram;
+  uint32_t hash_from_fram = 0;
+  this->comp_->fram_->read_bytes(addr + 8 + len, (uint8_t *) &hash_from_fram, 4);
+  // Use FNV-1a hash for data integrity (CRC32 not available in ESPHome)
+  uint32_t hash = FNV1_OFFSET_BASIS;
+  for (size_t i = 0; i < len; i++) {
+    hash ^= data[i];
+    hash *= FNV1_PRIME;
+  }
+  return hash == hash_from_fram;
 }
 
 void FramPref::setup() {

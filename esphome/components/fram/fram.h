@@ -17,11 +17,13 @@ class Fram : public Component, public i2c::I2CDevice {
   void read_bytes(uint32_t memaddr, uint8_t *value, uint32_t len);
 
   void set_size_bytes(uint32_t value) { this->size_bytes_ = value; }
+  void set_address_width(uint8_t width) { this->address_width_ = width; }
 
  protected:
   void write_bytes_16(uint32_t memaddr, const uint8_t *value, uint32_t len);
   void read_bytes_16(uint32_t memaddr, uint8_t *value, uint32_t len);
   uint32_t size_bytes_{0};
+  uint8_t address_width_{2};  // Default to 2-byte address (16-bit)
 };
 
 }  // namespace fram
