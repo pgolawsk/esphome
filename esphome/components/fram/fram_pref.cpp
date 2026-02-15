@@ -283,7 +283,7 @@ bool FramPref::reset() {
   uint32_t value = this->magic_;
   this->fram_->write_bytes(this->pool_start_, (uint8_t *) &value, 4);
   this->fram_->write_bytes(this->pool_start_ + 4, &this->version_, 1);
-  ESP_LOGI(TAG, "Factory reset: FRAM preferences cleared");
+  ESP_LOGD(TAG, "Factory reset: FRAM preferences cleared");
   return true;
 }
 
