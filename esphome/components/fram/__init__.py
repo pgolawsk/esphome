@@ -28,6 +28,7 @@ PREFERENCES_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(FramPrefComponent),
         cv.Optional("pool_size", default="1kB"): cv.validate_bytes,
+        cv.Optional("pool_start", default="0"): cv.validate_bytes,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -62,3 +63,4 @@ async def to_code(config):
         pref_var = cg.new_Pvariable(conf[CONF_ID], var)
         await cg.register_component(pref_var, conf)
         cg.add(pref_var.set_pool_size(conf["pool_size"]))
+        cg.add(pref_var.set_pool_start(conf["pool_start"]))

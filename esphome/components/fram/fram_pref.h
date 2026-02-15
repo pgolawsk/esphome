@@ -13,7 +13,8 @@ class FramPref : public Component, public ESPPreferences {
 
   void setup() override;
   void dump_config() override;
-  float get_setup_priority() const override { return setup_priority::IO; }
+  // Run after FRAM (IO) but before components that use preferences (BUS)
+  float get_setup_priority() const override { return setup_priority::BUS; }
 
   ESPPreferenceObject make_preference(size_t length, uint32_t type, bool in_flash) override;
   ESPPreferenceObject make_preference(size_t length, uint32_t type) override;
@@ -21,15 +22,19 @@ class FramPref : public Component, public ESPPreferences {
   bool reset() override;
 
   void set_pool_size(uint32_t value) { this->pool_size_ = value; }
+  void set_pool_start(uint32_t value) { this->pool_start_ = value; }
 
  protected:
   friend class FRAMPreferenceBackend;
+
+  void ensure_initialized_();
 
   fram::Fram *fram_;
   uint32_t pool_size_{0};
   uint32_t pool_start_{0};
   uint32_t magic_{0};
   bool pool_cleared_{false};
+  bool initialized_{false};
   uint8_t version_{1};
 };
 
