@@ -3,6 +3,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include "esphome/core/helpers.h"
+#include <vector>
 
 namespace esphome {
 namespace fram_pref {
@@ -168,17 +169,34 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
     return false;
   }
 
-  ESP_LOGV(TAG, "Save: Writing to addr %u", addr);
-  this->comp_->fram_->write_bytes(addr + 4, (uint8_t *) &len, 4);
-  this->comp_->fram_->write_bytes(addr + 8, data, len);
   // Use FNV-1a hash for data integrity (CRC32 not available in ESPHome)
   uint32_t hash = FNV1_OFFSET_BASIS;
   for (size_t i = 0; i < len; i++) {
     hash ^= data[i];
     hash *= FNV1_PRIME;
   }
-  this->comp_->fram_->write_bytes(addr + 8 + len, (uint8_t *) &hash, 4);
-  ESP_LOGV(TAG, "Save: Written hash 0x%08X", hash);
+
+  // Combine size + data + hash into a single buffer for one I2C transaction
+  // This reduces I2C overhead and prevents blocking for too long
+  std::vector<uint8_t> buffer;
+  buffer.reserve(4 + len + 4);
+  // Size (4 bytes)
+  buffer.push_back(len & 0xFF);
+  buffer.push_back((len >> 8) & 0xFF);
+  buffer.push_back((len >> 16) & 0xFF);
+  buffer.push_back((len >> 24) & 0xFF);
+  // Data
+  for (size_t i = 0; i < len; i++) {
+    buffer.push_back(data[i]);
+  }
+  // Hash (4 bytes)
+  buffer.push_back(hash & 0xFF);
+  buffer.push_back((hash >> 8) & 0xFF);
+  buffer.push_back((hash >> 16) & 0xFF);
+  buffer.push_back((hash >> 24) & 0xFF);
+
+  ESP_LOGV(TAG, "Save: Writing to addr %u, hash=0x%08X", addr, hash);
+  this->comp_->fram_->write_bytes(addr + 4, buffer.data(), buffer.size());
   return true;
 }
 
