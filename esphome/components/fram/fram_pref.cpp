@@ -273,9 +273,17 @@ bool FramPref::sync() { return true; }
 
 bool FramPref::reset() {
   this->pool_cleared_ = true;
+  // Clear the entire pool area
+  for (uint32_t i = 0; i < this->pool_size_; i += 32) {
+    uint8_t zeros[32] = {0};
+    uint32_t len = (i + 32 > this->pool_size_) ? (this->pool_size_ - i) : 32;
+    this->fram_->write_bytes(this->pool_start_ + i, zeros, len);
+  }
+  // Write magic and version
   uint32_t value = this->magic_;
   this->fram_->write_bytes(this->pool_start_, (uint8_t *) &value, 4);
   this->fram_->write_bytes(this->pool_start_ + 4, &this->version_, 1);
+  ESP_LOGI(TAG, "Factory reset: FRAM preferences cleared");
   return true;
 }
 
