@@ -28,7 +28,7 @@ void FramPref::ensure_initialized_() {
     return;
   }
 
-  ESP_LOGI(TAG, "Lazy initialization - pool_start=%u, pool_size=%u", this->pool_start_, this->pool_size_);
+  ESP_LOGV(TAG, "Lazy initialization - pool_start=%u, pool_size=%u", this->pool_start_, this->pool_size_);
 
   if (!this->fram_->is_connected()) {
     ESP_LOGW(TAG, "FRAM device not found");
@@ -38,7 +38,7 @@ void FramPref::ensure_initialized_() {
   this->magic_ = 0xDEADBEEF;
   uint32_t magic = 0;
   this->fram_->read_bytes(this->pool_start_, (uint8_t *) &magic, 4);
-  ESP_LOGI(TAG, "Read magic: 0x%08X, expected: 0x%08X", magic, this->magic_);
+  ESP_LOGV(TAG, "Read magic: 0x%08X, expected: 0x%08X", magic, this->magic_);
 
   bool needs_clear = false;
 
@@ -48,7 +48,7 @@ void FramPref::ensure_initialized_() {
   } else {
     uint8_t version_from_fram = 0;
     this->fram_->read_bytes(this->pool_start_ + 4, &version_from_fram, 1);
-    ESP_LOGI(TAG, "Version: %u, expected: %u", version_from_fram, this->version_);
+    ESP_LOGV(TAG, "Version: %u, expected: %u", version_from_fram, this->version_);
     if (version_from_fram != this->version_) {
       ESP_LOGW(TAG, "FRAM preferences version mismatch. Clearing preferences.");
       needs_clear = true;
@@ -58,7 +58,7 @@ void FramPref::ensure_initialized_() {
       uint32_t first_size = 0;
       this->fram_->read_bytes(this->pool_start_ + 5, (uint8_t *) &first_key, 4);
       this->fram_->read_bytes(this->pool_start_ + 9, (uint8_t *) &first_size, 4);
-      ESP_LOGI(TAG, "First key at addr 5: 0x%08X, size at addr 9: %u", first_key, first_size);
+      ESP_LOGV(TAG, "First key at addr 5: 0x%08X, size at addr 9: %u", first_key, first_size);
 
       // If first key is non-zero, validate the size is reasonable
       if (first_key != 0) {
@@ -88,12 +88,12 @@ void FramPref::ensure_initialized_() {
     // Verify write
     uint32_t verify_magic = 0;
     this->fram_->read_bytes(this->pool_start_, (uint8_t *) &verify_magic, 4);
-    ESP_LOGI(TAG, "Verify magic after write: 0x%08X", verify_magic);
+    ESP_LOGV(TAG, "Verify magic after write: 0x%08X", verify_magic);
 
     // Verify first key slot is zero
     uint32_t verify_key = 0;
     this->fram_->read_bytes(this->pool_start_ + 5, (uint8_t *) &verify_key, 4);
-    ESP_LOGI(TAG, "Verify first key slot: 0x%08X", verify_key);
+    ESP_LOGV(TAG, "Verify first key slot: 0x%08X", verify_key);
   }
 
   this->initialized_ = true;
@@ -119,12 +119,12 @@ uint32_t FRAMPreferenceBackend::find_key_(uint32_t key_hash) {
     this->comp_->fram_->read_bytes(addr, (uint8_t *) &key_from_fram, 4);
 
     if (key_from_fram == key_hash) {
-      ESP_LOGD(TAG, "Found key 0x%08X at addr %u", key_hash, addr);
+      ESP_LOGV(TAG, "Found key 0x%08X at addr %u", key_hash, addr);
       return addr;
     }
 
     if (key_from_fram == 0) {
-      ESP_LOGD(TAG, "Empty slot at addr %u, storing key 0x%08X", addr, key_hash);
+      ESP_LOGV(TAG, "Empty slot at addr %u, storing key 0x%08X", addr, key_hash);
       this->comp_->fram_->write_bytes(addr, (uint8_t *) &key_hash, 4);
       return addr;
     }
@@ -155,7 +155,7 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
   }
 
   uint32_t key_hash = fnv1_hash(std::to_string(this->type_));
-  ESP_LOGD(TAG, "Save: type=%u, key_hash=0x%08X, len=%u", this->type_, key_hash, len);
+  ESP_LOGV(TAG, "Save: type=%u, key_hash=0x%08X, len=%u", this->type_, key_hash, len);
 
   uint32_t addr = this->find_key_(key_hash);
 
@@ -164,7 +164,7 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
     return false;
   }
 
-  ESP_LOGD(TAG, "Save: Writing to addr %u", addr);
+  ESP_LOGV(TAG, "Save: Writing to addr %u", addr);
   this->comp_->fram_->write_bytes(addr + 4, (uint8_t *) &len, 4);
   this->comp_->fram_->write_bytes(addr + 8, data, len);
   // Use FNV-1a hash for data integrity (CRC32 not available in ESPHome)
@@ -174,7 +174,7 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
     hash *= FNV1_PRIME;
   }
   this->comp_->fram_->write_bytes(addr + 8 + len, (uint8_t *) &hash, 4);
-  ESP_LOGD(TAG, "Save: Written hash 0x%08X", hash);
+  ESP_LOGV(TAG, "Save: Written hash 0x%08X", hash);
   return true;
 }
 
@@ -185,18 +185,18 @@ bool FRAMPreferenceBackend::load(uint8_t *data, size_t len) {
   }
 
   uint32_t key_hash = fnv1_hash(std::to_string(this->type_));
-  ESP_LOGD(TAG, "Load: type=%u, key_hash=0x%08X, len=%u", this->type_, key_hash, len);
+  ESP_LOGV(TAG, "Load: type=%u, key_hash=0x%08X, len=%u", this->type_, key_hash, len);
 
   uint32_t addr = this->find_key_(key_hash);
 
   if (addr == 0) {
-    ESP_LOGD(TAG, "Load: Key 0x%08X not found", key_hash);
+    ESP_LOGV(TAG, "Load: Key 0x%08X not found", key_hash);
     return false;
   }
 
   uint32_t size_from_fram = 0;
   this->comp_->fram_->read_bytes(addr + 4, (uint8_t *) &size_from_fram, 4);
-  ESP_LOGD(TAG, "Load: addr=%u, size_from_fram=%u, expected=%u", addr, size_from_fram, len);
+  ESP_LOGV(TAG, "Load: addr=%u, size_from_fram=%u, expected=%u", addr, size_from_fram, len);
 
   if (size_from_fram != len) {
     ESP_LOGW(TAG, "Load: Size mismatch (got %u, expected %u)", size_from_fram, len);
@@ -213,13 +213,13 @@ bool FRAMPreferenceBackend::load(uint8_t *data, size_t len) {
     hash *= FNV1_PRIME;
   }
 
-  ESP_LOGD(TAG, "Load: computed hash=0x%08X, stored hash=0x%08X, match=%d", hash, hash_from_fram,
+  ESP_LOGV(TAG, "Load: computed hash=0x%08X, stored hash=0x%08X, match=%d", hash, hash_from_fram,
            hash == hash_from_fram);
   return hash == hash_from_fram;
 }
 
 void FramPref::setup() {
-  ESP_LOGI(TAG, "Setup: pool_start=%u, pool_size=%u", this->pool_start_, this->pool_size_);
+  ESP_LOGV(TAG, "Setup: pool_start=%u, pool_size=%u", this->pool_start_, this->pool_size_);
 
   // Initialize the pool
   this->ensure_initialized_();
@@ -227,7 +227,7 @@ void FramPref::setup() {
   // Set global preferences pointer
   global_preferences = this;
 
-  ESP_LOGI(TAG, "Setup complete, initialized=%d", this->initialized_);
+  ESP_LOGV(TAG, "Setup complete, initialized=%d", this->initialized_);
 }
 
 void FramPref::dump_config() {

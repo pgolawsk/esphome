@@ -45,7 +45,7 @@ void Fram::write_bytes_16(uint32_t memaddr, const uint8_t *value, uint32_t len) 
   for (uint32_t i = 0; i < len; i++) {
     buffer.push_back(value[i]);
   }
-  ESP_LOGD(TAG, "Write addr=0x%04X, len=%u, data[0]=0x%02X", memaddr, len, len > 0 ? value[0] : 0);
+  ESP_LOGV(TAG, "Write addr=0x%04X, len=%u", memaddr, len);
   auto err = this->bus_->write_readv(this->address_, buffer.data(), buffer.size(), nullptr, 0);
   if (err != i2c::ERROR_OK) {
     ESP_LOGW(TAG, "Write failed with error %d", err);
@@ -57,13 +57,11 @@ void Fram::read_bytes_16(uint32_t memaddr, uint8_t *value, uint32_t len) {
   uint8_t memaddr_lo = memaddr & 0xFF;
   // Write the 16-bit address, then read the data
   uint8_t addr_buf[2] = {memaddr_hi, memaddr_lo};
-  ESP_LOGD(TAG, "Read addr=0x%04X, len=%u", memaddr, len);
+  ESP_LOGV(TAG, "Read addr=0x%04X, len=%u", memaddr, len);
   auto err = this->bus_->write_readv(this->address_, addr_buf, 2, value, len);
   if (err != i2c::ERROR_OK) {
     ESP_LOGW(TAG, "Read failed with error %d", err);
   }
-  ESP_LOGD(TAG, "Read data[0-3]=0x%02X 0x%02X 0x%02X 0x%02X", len > 0 ? value[0] : 0, len > 1 ? value[1] : 0,
-           len > 2 ? value[2] : 0, len > 3 ? value[3] : 0);
 }
 
 }  // namespace fram
