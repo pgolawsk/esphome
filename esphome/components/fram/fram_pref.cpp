@@ -137,10 +137,18 @@ uint32_t FRAMPreferenceBackend::find_key_(uint32_t key_hash) {
     uint32_t size_from_fram = 0;
     this->comp_->fram_->read_bytes(addr + 4, (uint8_t *) &size_from_fram, 4);
 
-    // Safety check: if size is unreasonably large, abort
+    // Safety check: if size is unreasonably large, clear remaining pool and use this slot
     if (size_from_fram > 1024 || size_from_fram == 0xFFFFFFFF) {
-      ESP_LOGW(TAG, "Invalid size %u at addr %u, aborting search", size_from_fram, addr);
-      return 0;
+      ESP_LOGW(TAG, "Invalid size %u at addr %u, clearing remaining pool", size_from_fram, addr);
+      // Clear from this address to end of pool
+      for (uint32_t i = addr; i < end; i += 32) {
+        uint8_t zeros[32] = {0};
+        uint32_t len = (i + 32 > end) ? (end - i) : 32;
+        this->comp_->fram_->write_bytes(i, zeros, len);
+      }
+      // Now use this slot
+      this->comp_->fram_->write_bytes(addr, (uint8_t *) &key_hash, 4);
+      return addr;
     }
 
     addr += 8 + size_from_fram + 4;  // key + size + data + crc
