@@ -91,17 +91,6 @@ void FramPref::ensure_initialized_() {
       ESP_LOGW(TAG, "FRAM preferences version mismatch. Clearing preferences.");
       needs_clear = true;
     } else {
-      // Check if pool size decreased
-      uint32_t stored_pool_size = 0;
-      this->fram_->read_bytes(this->pool_start_ + 5, (uint8_t *) &stored_pool_size, 4);
-      ESP_LOGV(TAG, "Stored pool size: %u, current: %u", stored_pool_size, this->pool_size_);
-
-      if (stored_pool_size != 0 && this->pool_size_ < stored_pool_size) {
-        ESP_LOGW(TAG, "Pool size decreased from %u to %u! Data may be lost. Clearing pool.", stored_pool_size,
-                 this->pool_size_);
-        needs_clear = true;
-      }
-
       // Validate first key slot - should be 0 or a valid key with reasonable size
       uint32_t first_key = 0;
       uint32_t first_size = 0;
@@ -121,9 +110,29 @@ void FramPref::ensure_initialized_() {
   }
 
   if (!needs_clear) {
-    ESP_LOGD(TAG, "FRAM preferences pool restored successfully");
-    // Calculate pool usage
+    // Calculate pool usage before checking pool size change
     this->pool_used_ = this->calculate_pool_used_();
+
+    // Check if pool size decreased and data doesn't fit
+    uint32_t stored_pool_size = 0;
+    this->fram_->read_bytes(this->pool_start_ + 5, (uint8_t *) &stored_pool_size, 4);
+    ESP_LOGV(TAG, "Stored pool size: %u, current: %u, used: %u", stored_pool_size, this->pool_size_, this->pool_used_);
+
+    if (stored_pool_size != 0 && this->pool_size_ < stored_pool_size) {
+      // Pool size decreased - check if data still fits
+      if (this->pool_used_ > this->pool_size_) {
+        ESP_LOGW(TAG, "Pool size decreased from %u to %u and data (%u bytes) doesn't fit! Clearing pool.",
+                 stored_pool_size, this->pool_size_, this->pool_used_);
+        needs_clear = true;
+      } else {
+        ESP_LOGW(TAG, "Pool size decreased from %u to %u. Data (%u bytes) fits, preserving.", stored_pool_size,
+                 this->pool_size_, this->pool_used_);
+      }
+    }
+  }
+
+  if (!needs_clear) {
+    ESP_LOGD(TAG, "FRAM preferences pool restored successfully");
     float usage_percent = (this->pool_used_ * 100.0f) / this->pool_size_;
     ESP_LOGD(TAG, "Pool usage: %u/%u bytes (%.1f%%)", this->pool_used_, this->pool_size_, usage_percent);
 
