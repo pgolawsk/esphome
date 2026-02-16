@@ -190,18 +190,21 @@ uint32_t FRAMPreferenceBackend::find_key_(uint32_t key_hash) {
   uint32_t iterations = 0;
   const uint32_t max_iterations = 100;  // Safety limit
 
+  ESP_LOGD(TAG, "find_key_: looking for 0x%08X, pool_start=%u, pool_size=%u", key_hash, this->comp_->pool_start_,
+           this->comp_->pool_size_);
+
   while (addr < end && iterations < max_iterations) {
     iterations++;
     uint32_t key_from_fram = 0;
     this->comp_->fram_->read_bytes(addr, (uint8_t *) &key_from_fram, 4);
 
     if (key_from_fram == key_hash) {
-      ESP_LOGV(TAG, "Found key 0x%08X at addr %u", key_hash, addr);
+      ESP_LOGD(TAG, "Found key 0x%08X at addr %u (iteration %u)", key_hash, addr, iterations);
       return addr;
     }
 
     if (key_from_fram == 0) {
-      ESP_LOGV(TAG, "Empty slot at addr %u, storing key 0x%08X", addr, key_hash);
+      ESP_LOGD(TAG, "Empty slot at addr %u, storing key 0x%08X (iteration %u)", addr, key_hash, iterations);
       this->comp_->fram_->write_bytes(addr, (uint8_t *) &key_hash, 4);
       return addr;
     }
@@ -223,6 +226,7 @@ uint32_t FRAMPreferenceBackend::find_key_(uint32_t key_hash) {
       return addr;
     }
 
+    ESP_LOGV(TAG, "Skipping key 0x%08X at addr %u, size=%u", key_from_fram, addr, size_from_fram);
     addr += 8 + size_from_fram + 4;  // key + size + data + crc
   }
 
@@ -240,7 +244,7 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
   }
 
   uint32_t key_hash = fnv1_hash(std::to_string(this->type_));
-  ESP_LOGV(TAG, "Save: type=%u, key_hash=0x%08X, len=%u", this->type_, key_hash, len);
+  ESP_LOGD(TAG, "Save: type=%u, key_hash=0x%08X, len=%u", this->type_, key_hash, len);
 
   uint32_t addr = this->find_key_(key_hash);
 
@@ -248,6 +252,12 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
     ESP_LOGW(TAG, "Save: Could not find/allocate slot for key 0x%08X (pool may be full)", key_hash);
     return false;
   }
+
+  // Check if this is an update (key already exists at this address)
+  uint32_t existing_key = 0;
+  this->comp_->fram_->read_bytes(addr, (uint8_t *) &existing_key, 4);
+  bool is_update = (existing_key == key_hash);
+  ESP_LOGD(TAG, "Save: addr=%u, existing_key=0x%08X, is_update=%d", addr, existing_key, is_update);
 
   // Use FNV-1a hash for data integrity (CRC32 not available in ESPHome)
   uint32_t hash = FNV1_OFFSET_BASIS;
@@ -359,6 +369,26 @@ void FramPref::dump_config() {
   if (this->pool_cleared_) {
     ESP_LOGCONFIG(TAG, "  Pool was cleared");
   }
+
+  // Count number of keys in pool
+  uint32_t key_count = 0;
+  uint32_t addr = this->pool_start_ + POOL_HEADER_SIZE;
+  uint32_t end = this->pool_start_ + this->pool_size_;
+  while (addr < end) {
+    uint32_t key = 0;
+    this->fram_->read_bytes(addr, (uint8_t *) &key, 4);
+    if (key == 0) {
+      break;  // End of used pool
+    }
+    key_count++;
+    uint32_t size = 0;
+    this->fram_->read_bytes(addr + 4, (uint8_t *) &size, 4);
+    if (size > 1024 || size == 0xFFFFFFFF) {
+      break;  // Invalid size
+    }
+    addr += 8 + size + 4;  // key + size + data + hash
+  }
+  ESP_LOGCONFIG(TAG, "  Keys stored: %u", key_count);
 }
 
 ESPPreferenceObject FramPref::make_preference(size_t length, uint32_t type, bool in_flash) {
