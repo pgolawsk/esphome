@@ -10,6 +10,13 @@ namespace fram_pref {
 
 static const char *const TAG = "fram_pref";
 
+// Pool layout:
+// Offset 0: 4 bytes magic (0xDEADBEEF)
+// Offset 4: 1 byte version
+// Offset 5: 4 bytes pool_size (stored for validation)
+// Offset 9: key slots begin
+static const uint32_t POOL_HEADER_SIZE = 9;  // magic(4) + version(1) + pool_size(4)
+
 class FRAMPreferenceBackend : public ESPPreferenceBackend {
  public:
   FRAMPreferenceBackend(FramPref *comp, uint32_t type) : comp_(comp), type_(type) {}
@@ -23,6 +30,36 @@ class FRAMPreferenceBackend : public ESPPreferenceBackend {
   FramPref *comp_;
   uint32_t type_;
 };
+
+uint32_t FramPref::calculate_pool_used_() {
+  uint32_t addr = this->pool_start_ + POOL_HEADER_SIZE;
+  uint32_t end = this->pool_start_ + this->pool_size_;
+  uint32_t iterations = 0;
+  const uint32_t max_iterations = 100;
+
+  while (addr < end && iterations < max_iterations) {
+    iterations++;
+    uint32_t key = 0;
+    this->fram_->read_bytes(addr, (uint8_t *) &key, 4);
+
+    if (key == 0) {
+      // Empty slot - this is where the pool ends
+      return addr - this->pool_start_;
+    }
+
+    uint32_t size = 0;
+    this->fram_->read_bytes(addr + 4, (uint8_t *) &size, 4);
+
+    // Invalid size - return current position
+    if (size > 1024 || size == 0xFFFFFFFF) {
+      return addr - this->pool_start_;
+    }
+
+    addr += 8 + size + 4;  // key + size + data + hash
+  }
+
+  return addr - this->pool_start_;
+}
 
 void FramPref::ensure_initialized_() {
   if (this->initialized_) {
@@ -54,12 +91,23 @@ void FramPref::ensure_initialized_() {
       ESP_LOGW(TAG, "FRAM preferences version mismatch. Clearing preferences.");
       needs_clear = true;
     } else {
+      // Check if pool size decreased
+      uint32_t stored_pool_size = 0;
+      this->fram_->read_bytes(this->pool_start_ + 5, (uint8_t *) &stored_pool_size, 4);
+      ESP_LOGV(TAG, "Stored pool size: %u, current: %u", stored_pool_size, this->pool_size_);
+
+      if (stored_pool_size != 0 && this->pool_size_ < stored_pool_size) {
+        ESP_LOGW(TAG, "Pool size decreased from %u to %u! Data may be lost. Clearing pool.", stored_pool_size,
+                 this->pool_size_);
+        needs_clear = true;
+      }
+
       // Validate first key slot - should be 0 or a valid key with reasonable size
       uint32_t first_key = 0;
       uint32_t first_size = 0;
-      this->fram_->read_bytes(this->pool_start_ + 5, (uint8_t *) &first_key, 4);
-      this->fram_->read_bytes(this->pool_start_ + 9, (uint8_t *) &first_size, 4);
-      ESP_LOGV(TAG, "First key at addr 5: 0x%08X, size at addr 9: %u", first_key, first_size);
+      this->fram_->read_bytes(this->pool_start_ + POOL_HEADER_SIZE, (uint8_t *) &first_key, 4);
+      this->fram_->read_bytes(this->pool_start_ + POOL_HEADER_SIZE + 4, (uint8_t *) &first_size, 4);
+      ESP_LOGV(TAG, "First key at addr %u: 0x%08X, size: %u", POOL_HEADER_SIZE, first_key, first_size);
 
       // If first key is non-zero, validate the size is reasonable
       if (first_key != 0) {
@@ -74,6 +122,18 @@ void FramPref::ensure_initialized_() {
 
   if (!needs_clear) {
     ESP_LOGD(TAG, "FRAM preferences pool restored successfully");
+    // Calculate pool usage
+    this->pool_used_ = this->calculate_pool_used_();
+    float usage_percent = (this->pool_used_ * 100.0f) / this->pool_size_;
+    ESP_LOGD(TAG, "Pool usage: %u/%u bytes (%.1f%%)", this->pool_used_, this->pool_size_, usage_percent);
+
+    // Warn if pool is too small (over 90% at startup)
+    if (usage_percent > 90.0f) {
+      ESP_LOGW(TAG, "Pool is %.0f%% full! Consider increasing pool_size", usage_percent);
+    } else if (usage_percent > 80.0f) {
+      ESP_LOGW(TAG, "Pool is %.0f%% full. Consider increasing pool_size soon", usage_percent);
+      this->warned_80_percent_ = true;
+    }
   }
 
   if (needs_clear) {
@@ -85,10 +145,11 @@ void FramPref::ensure_initialized_() {
       uint32_t len = (i + 32 > this->pool_size_) ? (this->pool_size_ - i) : 32;
       this->fram_->write_bytes(this->pool_start_ + i, zeros, len);
     }
-    // Write magic and version
+    // Write magic, version, and pool_size
     uint32_t value = this->magic_;
     this->fram_->write_bytes(this->pool_start_, (uint8_t *) &value, 4);
     this->fram_->write_bytes(this->pool_start_ + 4, &this->version_, 1);
+    this->fram_->write_bytes(this->pool_start_ + 5, (uint8_t *) &this->pool_size_, 4);
 
     // Verify write
     uint32_t verify_magic = 0;
@@ -97,8 +158,10 @@ void FramPref::ensure_initialized_() {
 
     // Verify first key slot is zero
     uint32_t verify_key = 0;
-    this->fram_->read_bytes(this->pool_start_ + 5, (uint8_t *) &verify_key, 4);
+    this->fram_->read_bytes(this->pool_start_ + POOL_HEADER_SIZE, (uint8_t *) &verify_key, 4);
     ESP_LOGV(TAG, "Verify first key slot: 0x%08X", verify_key);
+
+    this->pool_used_ = POOL_HEADER_SIZE;
   }
 
   this->initialized_ = true;
@@ -113,7 +176,7 @@ uint32_t FRAMPreferenceBackend::find_key_(uint32_t key_hash) {
     return 0;
   }
 
-  uint32_t addr = this->comp_->pool_start_ + 5;  // 4 bytes for magic, 1 for version
+  uint32_t addr = this->comp_->pool_start_ + POOL_HEADER_SIZE;
   uint32_t end = this->comp_->pool_start_ + this->comp_->pool_size_;
   uint32_t iterations = 0;
   const uint32_t max_iterations = 100;  // Safety limit
@@ -173,7 +236,7 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
   uint32_t addr = this->find_key_(key_hash);
 
   if (addr == 0) {
-    ESP_LOGW(TAG, "Save: Could not find/allocate slot for key 0x%08X", key_hash);
+    ESP_LOGW(TAG, "Save: Could not find/allocate slot for key 0x%08X (pool may be full)", key_hash);
     return false;
   }
 
@@ -205,6 +268,22 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
 
   ESP_LOGV(TAG, "Save: Writing to addr %u, hash=0x%08X", addr, hash);
   this->comp_->fram_->write_bytes(addr + 4, buffer.data(), buffer.size());
+
+  // Update pool usage tracking
+  uint32_t entry_size = 4 + 4 + len + 4;  // key + size + data + hash
+  uint32_t new_used = (addr - this->comp_->pool_start_) + entry_size;
+  if (new_used > this->comp_->pool_used_) {
+    this->comp_->pool_used_ = new_used;
+  }
+
+  // Check for 80% warning
+  float usage_percent = (this->comp_->pool_used_ * 100.0f) / this->comp_->pool_size_;
+  if (usage_percent > 80.0f && !this->comp_->warned_80_percent_) {
+    ESP_LOGW(TAG, "Pool is %.0f%% full (%u/%u bytes). Consider increasing pool_size", usage_percent,
+             this->comp_->pool_used_, this->comp_->pool_size_);
+    this->comp_->warned_80_percent_ = true;
+  }
+
   return true;
 }
 
@@ -263,7 +342,11 @@ void FramPref::setup() {
 void FramPref::dump_config() {
   ESP_LOGCONFIG(TAG, "FRAM Preferences:");
   ESP_LOGCONFIG(TAG, "  Pool start: %u", this->pool_start_);
-  ESP_LOGCONFIG(TAG, "  Pool size: %u", this->pool_size_);
+  ESP_LOGCONFIG(TAG, "  Pool size: %u bytes", this->pool_size_);
+  if (this->pool_used_ > 0) {
+    float usage_percent = (this->pool_used_ * 100.0f) / this->pool_size_;
+    ESP_LOGCONFIG(TAG, "  Pool used: %u bytes (%.1f%%)", this->pool_used_, usage_percent);
+  }
   if (this->pool_cleared_) {
     ESP_LOGCONFIG(TAG, "  Pool was cleared");
   }
@@ -287,10 +370,13 @@ bool FramPref::reset() {
     uint32_t len = (i + 32 > this->pool_size_) ? (this->pool_size_ - i) : 32;
     this->fram_->write_bytes(this->pool_start_ + i, zeros, len);
   }
-  // Write magic and version
+  // Write magic, version, and pool_size
   uint32_t value = this->magic_;
   this->fram_->write_bytes(this->pool_start_, (uint8_t *) &value, 4);
   this->fram_->write_bytes(this->pool_start_ + 4, &this->version_, 1);
+  this->fram_->write_bytes(this->pool_start_ + 5, (uint8_t *) &this->pool_size_, 4);
+  this->pool_used_ = POOL_HEADER_SIZE;
+  this->warned_80_percent_ = false;
   ESP_LOGD(TAG, "Factory reset: FRAM preferences cleared");
   return true;
 }

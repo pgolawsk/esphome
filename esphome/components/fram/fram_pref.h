@@ -28,6 +28,7 @@ class FramPref : public Component, public ESPPreferences {
   friend class FRAMPreferenceBackend;
 
   void ensure_initialized_();
+  uint32_t calculate_pool_used_();
 
   fram::Fram *fram_;
   uint32_t pool_size_{0};
@@ -35,7 +36,9 @@ class FramPref : public Component, public ESPPreferences {
   uint32_t magic_{0};
   bool pool_cleared_{false};
   bool initialized_{false};
-  uint8_t version_{1};
+  uint8_t version_{2};  // Bumped version for pool_size storage format
+  uint32_t pool_used_{0};
+  bool warned_80_percent_{false};
 };
 
 }  // namespace fram_pref
