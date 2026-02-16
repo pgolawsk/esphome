@@ -317,7 +317,7 @@ bool FRAMPreferenceBackend::load(uint8_t *data, size_t len) {
   ESP_LOGV(TAG, "Load: addr=%u, size_from_fram=%u, expected=%u", addr, size_from_fram, len);
 
   if (size_from_fram != len) {
-    ESP_LOGW(TAG, "Load: Size mismatch (got %u, expected %u)", size_from_fram, len);
+    ESP_LOGV(TAG, "Load: Size mismatch (got %u, expected %u) - key may be from old config", size_from_fram, len);
     return false;
   }
 

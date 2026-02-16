@@ -24,6 +24,36 @@ FRAM_MODELS = {
     "MB85RC1M": (131072, 2),  # 128KB, 2-byte address
 }
 
+
+def validate_fram_config(config):
+    """Validate that pool_start + pool_size doesn't exceed FRAM size."""
+    if "preferences" not in config:
+        return config
+
+    pref = config["preferences"]
+    pool_start = pref["pool_start"]
+    pool_size = pref["pool_size"]
+    pool_end = pool_start + pool_size
+
+    # Determine FRAM size
+    if CONF_MODEL in config:
+        fram_size = FRAM_MODELS[config[CONF_MODEL]][0]
+    elif "size" in config:
+        fram_size = config["size"]
+    else:
+        # No size specified, default to largest model
+        fram_size = FRAM_MODELS["MB85RC1M"][0]
+
+    if pool_end > fram_size:
+        raise cv.Invalid(
+            f"FRAM preferences pool (start={pool_start}, size={pool_size}) "
+            f"exceeds FRAM size ({fram_size} bytes). "
+            f"Pool end: {pool_end}, FRAM size: {fram_size}"
+        )
+
+    return config
+
+
 PREFERENCES_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(FramPrefComponent),
@@ -32,7 +62,7 @@ PREFERENCES_SCHEMA = cv.Schema(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
-CONFIG_SCHEMA = (
+CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(FramComponent),
@@ -42,7 +72,8 @@ CONFIG_SCHEMA = (
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
-    .extend(i2c.i2c_device_schema(0x50))
+    .extend(i2c.i2c_device_schema(0x50)),
+    validate_fram_config,
 )
 
 
