@@ -99,13 +99,13 @@ bool FramI2cPlatform::write_bytes_16(uint32_t memaddr, const uint8_t *data, size
   // Standard I2C FRAM write: [device_addr+W][addr_high][addr_low][data...]
   // FRAM doesn't need page write delays like EEPROM
 
-  // Prepare buffer: address + data
-  std::vector<uint8_t> buf(2 + len);
+  // Prepare buffer: address + data (using unique_ptr to avoid STL vector overhead)
+  auto buf = std::make_unique<uint8_t[]>(2 + len);
   buf[0] = (memaddr >> 8) & 0xFF;
   buf[1] = memaddr & 0xFF;
-  std::copy(data, data + len, buf.begin() + 2);
+  std::copy(data, data + len, buf.get() + 2);
 
-  i2c::ErrorCode err = this->write(buf.data(), buf.size());
+  i2c::ErrorCode err = this->write(buf.get(), 2 + len);
   if (err != i2c::ERROR_OK) {
     ESP_LOGE(TAG, "Write failed at address %u: error %d", memaddr, err);
     return false;
@@ -141,12 +141,13 @@ bool FramI2cPlatform::write_bytes_ext(uint32_t memaddr, const uint8_t *data, siz
   uint8_t addr_high = (memaddr >> 16) & 0x03;
   uint8_t modified_address = (this->address_ & 0xFC) | addr_high;
 
-  std::vector<uint8_t> buf(2 + len);
+  // Using unique_ptr to avoid STL vector overhead
+  auto buf = std::make_unique<uint8_t[]>(2 + len);
   buf[0] = (memaddr >> 8) & 0xFF;
   buf[1] = memaddr & 0xFF;
-  std::copy(data, data + len, buf.begin() + 2);
+  std::copy(data, data + len, buf.get() + 2);
 
-  i2c::ErrorCode err = this->bus_->write(modified_address, buf.data(), buf.size());
+  i2c::ErrorCode err = this->bus_->write(modified_address, buf.get(), 2 + len);
   if (err != i2c::ERROR_OK) {
     ESP_LOGE(TAG, "Extended write failed at address %u: error %d", memaddr, err);
     return false;

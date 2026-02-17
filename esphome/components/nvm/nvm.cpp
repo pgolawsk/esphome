@@ -1,6 +1,8 @@
 #include "nvm.h"
 #include "esphome/core/log.h"
 
+#include <array>
+
 namespace esphome {
 namespace nvm {
 
@@ -250,7 +252,8 @@ bool KeyValuePartition::has_key(const std::string &key) {
 }
 
 std::string KeyValuePartition::get_string(const std::string &key, const std::string &default_value) {
-  std::vector<uint8_t> buffer(256);
+  // Use std::array for compile-time known size (avoid STL vector overhead)
+  std::array<uint8_t, 256> buffer{};
   int len = this->get(key, buffer.data(), buffer.size());
   if (len < 0) {
     return default_value;
@@ -279,10 +282,11 @@ bool KeyValuePartition::find_key(const std::string &key, uint32_t &offset, uint3
 
     // Check if key matches
     if (key_len == key.size()) {
-      std::vector<uint8_t> stored_key(key_len);
-      this->read(current_offset + 1, stored_key.data(), key_len);
+      // Use unique_ptr for runtime-sized buffer (avoid STL vector overhead)
+      auto stored_key = std::make_unique<uint8_t[]>(key_len);
+      this->read(current_offset + 1, stored_key.get(), key_len);
 
-      if (std::string(stored_key.begin(), stored_key.end()) == key) {
+      if (std::string(stored_key.get(), stored_key.get() + key_len) == key) {
         // Found it!
         offset = current_offset;
         this->read(current_offset + 1 + key_len, reinterpret_cast<uint8_t *>(&value_len), 2);

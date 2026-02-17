@@ -26,7 +26,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID, CONF_OFFSET, CONF_SIZE, CONF_TYPE
 
-CODEOWNERS = ["@pawelo"]
+CODEOWNERS = ["@pgolawsk"]
 
 # NVM namespace
 nvm_ns = cg.esphome_ns.namespace("nvm")
