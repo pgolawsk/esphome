@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/preferences.h"
 #include "esphome/components/fram/fram.h"
+#include "esphome/components/safe_mode/safe_mode.h"
 
 namespace esphome {
 namespace fram_pref {
@@ -31,6 +32,7 @@ class FramPref : public Component, public ESPPreferences {
   uint32_t calculate_pool_used_();
 
   fram::Fram *fram_;
+  ESPPreferences *nvs_preferences_{nullptr};  // Original NVS preferences for delegated keys
   uint32_t pool_size_{0};
   uint32_t pool_start_{0};
   uint32_t magic_{0};

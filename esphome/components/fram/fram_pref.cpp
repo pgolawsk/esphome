@@ -351,6 +351,11 @@ void FramPref::setup() {
   // Initialize the pool
   this->ensure_initialized_();
 
+  // Save the original NVS preferences before replacing
+  // This is needed to delegate the boot counter key which must stay in NVS
+  // because safe_mode reads it before FRAM preferences is initialized
+  this->nvs_preferences_ = global_preferences;
+
   // Set global preferences pointer
   global_preferences = this;
 
@@ -368,6 +373,7 @@ void FramPref::dump_config() {
   if (this->pool_cleared_) {
     ESP_LOGCONFIG(TAG, "  Pool was cleared");
   }
+  ESP_LOGCONFIG(TAG, "  Boot counter: delegated to NVS");
 
   // Count number of keys in pool
   uint32_t key_count = 0;
@@ -395,10 +401,21 @@ ESPPreferenceObject FramPref::make_preference(size_t length, uint32_t type, bool
 }
 
 ESPPreferenceObject FramPref::make_preference(size_t length, uint32_t type) {
+  // Delegate boot counter to NVS - safe_mode reads it before FRAM is initialized
+  if (type == safe_mode::RTC_KEY && this->nvs_preferences_ != nullptr) {
+    ESP_LOGV(TAG, "Delegating boot counter key %u to NVS", type);
+    return this->nvs_preferences_->make_preference(length, type);
+  }
   return ESPPreferenceObject(new FRAMPreferenceBackend(this, type));
 }
 
-bool FramPref::sync() { return true; }
+bool FramPref::sync() {
+  // Also sync NVS preferences (for delegated keys like boot counter)
+  if (this->nvs_preferences_ != nullptr) {
+    this->nvs_preferences_->sync();
+  }
+  return true;
+}
 
 bool FramPref::reset() {
   this->pool_cleared_ = true;
