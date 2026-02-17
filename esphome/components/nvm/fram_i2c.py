@@ -26,6 +26,7 @@ from esphome.const import CONF_ADDRESS, CONF_ID, CONF_MODEL
 from . import NVM_PLATFORM_SCHEMA, NvmPlatform, nvm_ns, register_nvm_platform
 
 CODEOWNERS = ["@pawelo"]
+DEPENDENCIES = ["i2c"]
 
 # FRAM I2C platform class
 FramI2cPlatform = nvm_ns.class_("FramI2cPlatform", NvmPlatform, i2c.I2CDevice)
