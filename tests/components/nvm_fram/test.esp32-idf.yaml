@@ -1,0 +1,98 @@
+# Test configuration for NVM FRAM component
+# This tests the new NVM architecture with FRAM platform
+
+esphome:
+  name: test-nvm-fram
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+
+# NVM component with FRAM platform
+nvm:
+  - platform: fram
+    id: my_fram
+    address: 0x50
+    type: MB85RC256
+
+    partitions:
+      # Preferences partition for ESPHome preferences system
+      - id: preferences
+        type: preferences
+        size: 4KB
+        offset: 0
+
+      # Raw data partition for user data
+      - id: sensor_cache
+        type: raw
+        size: 12KB
+        offset: 4096
+
+      # Key-value partition for configuration
+      - id: config
+        type: key_value
+        size: 2KB
+        offset: 16384
+
+# Test sensors
+sensor:
+  - platform: template
+    name: "Test Counter"
+    id: test_counter
+    lambda: |-
+      static int counter = 0;
+      return counter++;
+    update_interval: 10s
+
+# Test script to verify NVM operations
+script:
+  - id: test_nvm_operations
+    then:
+      - lambda: |-
+          // Get NVM platform
+          auto* nvm = id(my_fram);
+
+          // Test raw partition
+          auto* raw_part = nvm->get_partition("sensor_cache");
+          if (raw_part != nullptr) {
+            // Write test data
+            uint8_t test_data[] = {0x01, 0x02, 0x03, 0x04};
+            raw_part->write(0, test_data, sizeof(test_data));
+
+            // Read back
+            uint8_t read_data[4];
+            raw_part->read(0, read_data, sizeof(read_data));
+
+            ESP_LOGI("test", "Raw partition test: wrote %02X%02X%02X%02X, read %02X%02X%02X%02X",
+                     test_data[0], test_data[1], test_data[2], test_data[3],
+                     read_data[0], read_data[1], read_data[2], read_data[3]);
+          }
+
+          // Test key-value partition
+          auto* kv_part = nvm->get_partition("config");
+          if (kv_part != nullptr) {
+            // Cast to KeyValuePartition
+            auto* kv = static_cast<esphome::nvm::KeyValuePartition*>(kv_part);
+
+            // Set a value
+            uint8_t value[] = {0xDE, 0xAD, 0xBE, 0xEF};
+            kv->set("test_key", value, sizeof(value));
+
+            // Get the value back
+            uint8_t read_value[4];
+            int len = kv->get("test_key", read_value, sizeof(read_value));
+
+            if (len > 0) {
+              ESP_LOGI("test", "Key-value test: got %d bytes: %02X%02X%02X%02X",
+                       len, read_value[0], read_value[1], read_value[2], read_value[3]);
+            }
+          }
