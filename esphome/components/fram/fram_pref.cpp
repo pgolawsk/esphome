@@ -66,7 +66,7 @@ void FramPref::ensure_initialized_() {
     return;
   }
 
-  ESP_LOGV(TAG, "Lazy initialization - pool_start=%u, pool_size=%u", this->pool_start_, this->pool_size_);
+  ESP_LOGVV(TAG, "Lazy initialization - pool_start=%u, pool_size=%u", this->pool_start_, this->pool_size_);
 
   if (!this->fram_->is_connected()) {
     ESP_LOGW(TAG, "FRAM device not found");
@@ -76,7 +76,7 @@ void FramPref::ensure_initialized_() {
   this->magic_ = 0xDEADBEEF;
   uint32_t magic = 0;
   this->fram_->read_bytes(this->pool_start_, (uint8_t *) &magic, 4);
-  ESP_LOGV(TAG, "Read magic: 0x%08X, expected: 0x%08X", magic, this->magic_);
+  ESP_LOGVV(TAG, "Read magic: 0x%08X, expected: 0x%08X", magic, this->magic_);
 
   bool needs_clear = false;
 
@@ -86,7 +86,7 @@ void FramPref::ensure_initialized_() {
   } else {
     uint8_t version_from_fram = 0;
     this->fram_->read_bytes(this->pool_start_ + 4, &version_from_fram, 1);
-    ESP_LOGV(TAG, "Version: %u, expected: %u", version_from_fram, this->version_);
+    ESP_LOGVV(TAG, "Version: %u, expected: %u", version_from_fram, this->version_);
     if (version_from_fram != this->version_) {
       ESP_LOGW(TAG, "FRAM preferences version mismatch. Clearing preferences.");
       needs_clear = true;
@@ -96,7 +96,7 @@ void FramPref::ensure_initialized_() {
       uint32_t first_size = 0;
       this->fram_->read_bytes(this->pool_start_ + POOL_HEADER_SIZE, (uint8_t *) &first_key, 4);
       this->fram_->read_bytes(this->pool_start_ + POOL_HEADER_SIZE + 4, (uint8_t *) &first_size, 4);
-      ESP_LOGV(TAG, "First key at addr %u: 0x%08X, size: %u", POOL_HEADER_SIZE, first_key, first_size);
+      ESP_LOGVV(TAG, "First key at addr %u: 0x%08X, size: %u", POOL_HEADER_SIZE, first_key, first_size);
 
       // If first key is non-zero, validate the size is reasonable
       if (first_key != 0) {
@@ -116,7 +116,7 @@ void FramPref::ensure_initialized_() {
     // Check if pool size decreased and data doesn't fit
     uint32_t stored_pool_size = 0;
     this->fram_->read_bytes(this->pool_start_ + 5, (uint8_t *) &stored_pool_size, 4);
-    ESP_LOGV(TAG, "Stored pool size: %u, current: %u, used: %u", stored_pool_size, this->pool_size_, this->pool_used_);
+    ESP_LOGVV(TAG, "Stored pool size: %u, current: %u, used: %u", stored_pool_size, this->pool_size_, this->pool_used_);
 
     if (stored_pool_size != 0 && this->pool_size_ < stored_pool_size) {
       // Pool size decreased - check if data still fits
@@ -147,7 +147,7 @@ void FramPref::ensure_initialized_() {
 
   if (needs_clear) {
     this->pool_cleared_ = true;
-    ESP_LOGD(TAG, "Clearing pool area...");
+    ESP_LOGI(TAG, "Clearing pool area...");
     // Clear the pool area by writing zeros
     for (uint32_t i = 0; i < this->pool_size_; i += 32) {
       uint8_t zeros[32] = {0};
@@ -163,12 +163,12 @@ void FramPref::ensure_initialized_() {
     // Verify write
     uint32_t verify_magic = 0;
     this->fram_->read_bytes(this->pool_start_, (uint8_t *) &verify_magic, 4);
-    ESP_LOGV(TAG, "Verify magic after write: 0x%08X", verify_magic);
+    ESP_LOGVV(TAG, "Verify magic after write: 0x%08X", verify_magic);
 
     // Verify first key slot is zero
     uint32_t verify_key = 0;
     this->fram_->read_bytes(this->pool_start_ + POOL_HEADER_SIZE, (uint8_t *) &verify_key, 4);
-    ESP_LOGV(TAG, "Verify first key slot: 0x%08X", verify_key);
+    ESP_LOGVV(TAG, "Verify first key slot: 0x%08X", verify_key);
 
     this->pool_used_ = POOL_HEADER_SIZE;
   }
@@ -226,7 +226,6 @@ uint32_t FRAMPreferenceBackend::find_key_(uint32_t key_hash) {
       return addr;
     }
 
-    ESP_LOGV(TAG, "Skipping key 0x%08X at addr %u, size=%u", key_from_fram, addr, size_from_fram);
     addr += 8 + size_from_fram + 4;  // key + size + data + crc
   }
 
@@ -285,7 +284,7 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
   buffer.push_back((hash >> 16) & 0xFF);
   buffer.push_back((hash >> 24) & 0xFF);
 
-  ESP_LOGV(TAG, "Save: Writing to addr %u, hash=0x%08X", addr, hash);
+  ESP_LOGVV(TAG, "Save: Writing to addr %u, hash=0x%08X", addr, hash);
   this->comp_->fram_->write_bytes(addr + 4, buffer.data(), buffer.size());
 
   // Update pool usage tracking
@@ -324,10 +323,10 @@ bool FRAMPreferenceBackend::load(uint8_t *data, size_t len) {
 
   uint32_t size_from_fram = 0;
   this->comp_->fram_->read_bytes(addr + 4, (uint8_t *) &size_from_fram, 4);
-  ESP_LOGV(TAG, "Load: addr=%u, size_from_fram=%u, expected=%u", addr, size_from_fram, len);
+  ESP_LOGVV(TAG, "Load: addr=%u, size_from_fram=%u, expected=%u", addr, size_from_fram, len);
 
   if (size_from_fram != len) {
-    ESP_LOGV(TAG, "Load: Size mismatch (got %u, expected %u) - key may be from old config", size_from_fram, len);
+    ESP_LOGVV(TAG, "Load: Size mismatch (got %u, expected %u) - key may be from old config", size_from_fram, len);
     return false;
   }
 
@@ -341,13 +340,13 @@ bool FRAMPreferenceBackend::load(uint8_t *data, size_t len) {
     hash *= FNV1_PRIME;
   }
 
-  ESP_LOGV(TAG, "Load: computed hash=0x%08X, stored hash=0x%08X, match=%d", hash, hash_from_fram,
-           hash == hash_from_fram);
+  ESP_LOGVV(TAG, "Load: computed hash=0x%08X, stored hash=0x%08X, match=%d", hash, hash_from_fram,
+            hash == hash_from_fram);
   return hash == hash_from_fram;
 }
 
 void FramPref::setup() {
-  ESP_LOGV(TAG, "Setup: pool_start=%u, pool_size=%u", this->pool_start_, this->pool_size_);
+  ESP_LOGVV(TAG, "Setup: pool_start=%u, pool_size=%u", this->pool_start_, this->pool_size_);
 
   // Initialize the pool
   this->ensure_initialized_();
@@ -355,7 +354,7 @@ void FramPref::setup() {
   // Set global preferences pointer
   global_preferences = this;
 
-  ESP_LOGV(TAG, "Setup complete, initialized=%d", this->initialized_);
+  ESP_LOGVV(TAG, "Setup complete, initialized=%d", this->initialized_);
 }
 
 void FramPref::dump_config() {
