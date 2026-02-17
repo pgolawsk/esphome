@@ -190,7 +190,7 @@ uint32_t FRAMPreferenceBackend::find_key_(uint32_t key_hash) {
   uint32_t iterations = 0;
   const uint32_t max_iterations = 100;  // Safety limit
 
-  ESP_LOGD(TAG, "find_key_: looking for 0x%08X, pool_start=%u, pool_size=%u", key_hash, this->comp_->pool_start_,
+  ESP_LOGV(TAG, "find_key_: looking for 0x%08X, pool_start=%u, pool_size=%u", key_hash, this->comp_->pool_start_,
            this->comp_->pool_size_);
 
   while (addr < end && iterations < max_iterations) {
@@ -199,12 +199,12 @@ uint32_t FRAMPreferenceBackend::find_key_(uint32_t key_hash) {
     this->comp_->fram_->read_bytes(addr, (uint8_t *) &key_from_fram, 4);
 
     if (key_from_fram == key_hash) {
-      ESP_LOGD(TAG, "Found key 0x%08X at addr %u (iteration %u)", key_hash, addr, iterations);
+      ESP_LOGV(TAG, "Found key 0x%08X at addr %u (iteration %u)", key_hash, addr, iterations);
       return addr;
     }
 
     if (key_from_fram == 0) {
-      ESP_LOGD(TAG, "Empty slot at addr %u, storing key 0x%08X (iteration %u)", addr, key_hash, iterations);
+      ESP_LOGV(TAG, "Empty slot at addr %u, storing key 0x%08X (iteration %u)", addr, key_hash, iterations);
       this->comp_->fram_->write_bytes(addr, (uint8_t *) &key_hash, 4);
       return addr;
     }
@@ -244,7 +244,7 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
   }
 
   uint32_t key_hash = fnv1_hash(std::to_string(this->type_));
-  ESP_LOGD(TAG, "Save: type=%u, key_hash=0x%08X, len=%u", this->type_, key_hash, len);
+  ESP_LOGV(TAG, "Save: type=%u, key_hash=0x%08X, len=%u", this->type_, key_hash, len);
 
   uint32_t addr = this->find_key_(key_hash);
 
@@ -257,7 +257,7 @@ bool FRAMPreferenceBackend::save(const uint8_t *data, size_t len) {
   uint32_t existing_key = 0;
   this->comp_->fram_->read_bytes(addr, (uint8_t *) &existing_key, 4);
   bool is_update = (existing_key == key_hash);
-  ESP_LOGD(TAG, "Save: addr=%u, existing_key=0x%08X, is_update=%d", addr, existing_key, is_update);
+  ESP_LOGV(TAG, "Save: addr=%u, existing_key=0x%08X, is_update=%d", addr, existing_key, is_update);
 
   // Use FNV-1a hash for data integrity (CRC32 not available in ESPHome)
   uint32_t hash = FNV1_OFFSET_BASIS;
