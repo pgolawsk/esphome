@@ -22,3 +22,7 @@ nvm:
       - id: kv_partition
         type: key_value
         size: 2KB
+
+# Connect preferences partition to ESPHome preferences system
+nvm_pref:
+  partition: pref_partition
