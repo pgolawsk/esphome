@@ -22,7 +22,7 @@ const char *partition_type_to_string(PartitionType type);
 struct PartitionConfig {
   std::string id;      ///< User-defined partition ID
   PartitionType type;  ///< Partition type
-  uint32_t offset;     ///< Offset in NVM device
+  uint32_t offset;     ///< Offset in NVM device (auto-calculated if 0)
   uint32_t size;       ///< Size in bytes
 };
 
@@ -30,6 +30,10 @@ struct PartitionConfig {
 class NvmPlatform;
 
 /// Base class for NVM partitions
+///
+/// This class provides a logical view of a portion of an NVM device.
+/// Partitions are owned by an NvmPlatform and provide type-specific
+/// interfaces for accessing the underlying storage.
 class NvmPartition {
  public:
   NvmPartition(NvmPlatform *parent, const PartitionConfig &config);
@@ -69,11 +73,23 @@ class NvmPartition {
   PartitionConfig config_;
 };
 
-/// Base class for NVM platforms (FRAM, EEPROM, etc.)
+/// Abstract base class for NVM platforms (FRAM, EEPROM, etc.)
+///
+/// This class defines the interface that all NVM platforms must implement.
+/// Platforms are responsible for the low-level read/write operations to
+/// the physical device. The base class handles partition management.
+///
+/// Platform implementations:
+/// - FramI2cPlatform: I2C FRAM devices (MB85RC series)
+/// - FramSpiPlatform: SPI FRAM devices (MB85RS series) - future
+/// - EepromI2cPlatform: I2C EEPROM devices (AT24C series) - future
+/// - EepromSpiPlatform: SPI EEPROM devices (AT25 series) - future
 class NvmPlatform : public Component {
  public:
   NvmPlatform() = default;
   ~NvmPlatform() override = default;
+
+  // ========== Abstract interface - must be implemented by platform ==========
 
   /// Read bytes from NVM device
   /// @param memaddr Absolute memory address
@@ -91,6 +107,8 @@ class NvmPlatform : public Component {
 
   /// Get total size of NVM device in bytes
   virtual uint32_t get_total_size() const = 0;
+
+  // ========== Partition management ==========
 
   /// Add a partition to this NVM device
   /// @param config Partition configuration
@@ -111,20 +129,29 @@ class NvmPlatform : public Component {
   bool validate_partition_config(const PartitionConfig &config);
 
   // ========== Component methods ==========
+  void setup() override;
   void dump_config() override;
 
  protected:
   std::vector<std::unique_ptr<NvmPartition>> partitions_;
+
+  /// Check for partition overlaps
+  bool check_partition_overlap(const PartitionConfig &config);
+
+  /// Calculate automatic offsets for partitions
+  void calculate_partition_offsets();
 };
 
 /// Specialized partition for preferences storage
+///
+/// This partition type integrates with ESPHome's preferences system,
+/// allowing global variables and other preferences to be stored in
+/// external NVM instead of flash.
 class PreferencesPartition : public NvmPartition {
  public:
   using NvmPartition::NvmPartition;
 
   /// Get the ESPPreferences backend for this partition
-  /// This is used by the preferences system to store/restore values
-  /// @return Pointer to preferences backend
   void *get_preferences_backend() { return preferences_backend_; }
 
   void set_preferences_backend(void *backend) { preferences_backend_ = backend; }
@@ -134,12 +161,37 @@ class PreferencesPartition : public NvmPartition {
 };
 
 /// Specialized partition for raw data storage
+///
+/// This partition type provides direct byte-level access to the storage.
+/// Users are responsible for managing the data structure and format.
 class RawPartition : public NvmPartition {
  public:
   using NvmPartition::NvmPartition;
+
+  /// Read a value from the partition at the specified offset
+  /// @tparam T Type of value to read
+  /// @param offset Byte offset within partition
+  /// @param value Reference to store the read value
+  /// @return true on success
+  template<typename T> bool read_value(uint32_t offset, T &value) {
+    return read(offset, reinterpret_cast<uint8_t *>(&value), sizeof(T));
+  }
+
+  /// Write a value to the partition at the specified offset
+  /// @tparam T Type of value to write
+  /// @param offset Byte offset within partition
+  /// @param value Value to write
+  /// @return true on success
+  template<typename T> bool write_value(uint32_t offset, const T &value) {
+    return write(offset, reinterpret_cast<const uint8_t *>(&value), sizeof(T));
+  }
 };
 
 /// Specialized partition for key-value storage
+///
+/// This partition type provides a simple key-value store where values
+/// can be stored and retrieved by string keys. The storage format is:
+/// [key_len: 1 byte][key: N bytes][value_len: 2 bytes][value: M bytes]
 class KeyValuePartition : public NvmPartition {
  public:
   using NvmPartition::NvmPartition;
@@ -168,10 +220,29 @@ class KeyValuePartition : public NvmPartition {
   /// @return true if key exists
   bool has_key(const std::string &key);
 
+  /// Get value as string
+  /// @param key Key to look up
+  /// @param default_value Value to return if key not found
+  /// @return The stored value or default_value
+  std::string get_string(const std::string &key, const std::string &default_value = "");
+
+  /// Set value as string
+  /// @param key Key to set
+  /// @param value String value to store
+  /// @return true on success
+  bool set_string(const std::string &key, const std::string &value);
+
  protected:
-  // Key-value storage format:
-  // [key_len: 1 byte][key: N bytes][value_len: 2 bytes][value: M bytes]
-  // Keys are stored sequentially, no indexing
+  /// Find key entry in storage
+  /// @param key Key to find
+  /// @param offset Output: offset where key starts
+  /// @param value_offset Output: offset where value starts
+  /// @param value_len Output: length of value
+  /// @return true if key found
+  bool find_key(const std::string &key, uint32_t &offset, uint32_t &value_offset, uint16_t &value_len);
+
+  /// Compact storage (remove deleted entries)
+  void compact();
 };
 
 }  // namespace nvm
