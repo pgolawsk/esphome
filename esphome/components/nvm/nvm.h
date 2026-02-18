@@ -2,6 +2,8 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
+#include "esphome/core/preferences.h"
+#include "esphome/components/safe_mode/safe_mode.h"
 #include <vector>
 #include <memory>
 
@@ -147,17 +149,63 @@ class NvmPlatform : public Component {
 /// This partition type integrates with ESPHome's preferences system,
 /// allowing global variables and other preferences to be stored in
 /// external NVM instead of flash.
-class PreferencesPartition : public NvmPartition {
+///
+/// When created, this partition automatically registers itself as the
+/// global preferences backend, replacing the default flash-based storage.
+class PreferencesPartition : public NvmPartition, public Component, public ESPPreferences {
  public:
   using NvmPartition::NvmPartition;
 
-  /// Get the ESPPreferences backend for this partition
-  void *get_preferences_backend() { return preferences_backend_; }
+  /// Setup the preferences backend
+  void setup() override;
 
-  void set_preferences_backend(void *backend) { preferences_backend_ = backend; }
+  /// Run after FRAM (IO) but before components that use preferences (BUS)
+  float get_setup_priority() const override { return setup_priority::BUS; }
+
+  /// Dump configuration
+  void dump_config() override;
+
+  // ========== ESPPreferences interface ==========
+  ESPPreferenceObject make_preference(size_t length, uint32_t type, bool in_flash) override;
+  ESPPreferenceObject make_preference(size_t length, uint32_t type) override;
+  bool sync() override;
+  bool reset() override;
 
  protected:
-  void *preferences_backend_{nullptr};
+  friend class NvmPreferenceBackend;
+
+  /// Initialize the preferences pool
+  void ensure_initialized_();
+
+  /// Calculate pool usage
+  uint32_t calculate_pool_used_();
+
+  ESPPreferences *nvs_preferences_{nullptr};  ///< Original NVS preferences for delegated keys
+  bool initialized_{false};
+  bool pool_cleared_{false};
+  uint32_t pool_used_{0};
+  bool warned_80_percent_{false};
+
+  // Pool header constants
+  static const uint32_t POOL_HEADER_SIZE = 9;  ///< magic(4) + version(1) + pool_size(4)
+  static const uint32_t MAGIC = 0xDEADBEEF;
+  static const uint8_t VERSION = 3;  ///< Version 3 for NVM preferences format
+};
+
+/// Backend for individual preference objects
+class NvmPreferenceBackend : public ESPPreferenceBackend {
+ public:
+  NvmPreferenceBackend(PreferencesPartition *partition, uint32_t type) : partition_(partition), type_(type) {}
+
+  bool save(const uint8_t *data, size_t len) override;
+  bool load(uint8_t *data, size_t len) override;
+
+ protected:
+  /// Find or allocate a key slot
+  uint32_t find_key_(uint32_t key_hash);
+
+  PreferencesPartition *partition_;
+  uint32_t type_;
 };
 
 /// Specialized partition for raw data storage

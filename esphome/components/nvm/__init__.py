@@ -34,7 +34,7 @@ nvm_ns = cg.esphome_ns.namespace("nvm")
 # C++ classes
 NvmPlatform = nvm_ns.class_("NvmPlatform", cg.Component)
 NvmPartition = nvm_ns.class_("NvmPartition")
-PreferencesPartition = nvm_ns.class_("PreferencesPartition", NvmPartition)
+PreferencesPartition = nvm_ns.class_("PreferencesPartition", NvmPartition, cg.Component)
 RawPartition = nvm_ns.class_("RawPartition", NvmPartition)
 KeyValuePartition = nvm_ns.class_("KeyValuePartition", NvmPartition)
 PartitionType = nvm_ns.enum("PartitionType")
@@ -78,8 +78,14 @@ def parse_size(value):
     raise cv.Invalid(f"Invalid size: {value}")
 
 
-def register_nvm_platform(platform_var, config):
-    """Register an NVM platform with its partitions."""
+async def register_nvm_platform(platform_var, config):
+    """Register an NVM platform with its partitions.
+
+    This function also automatically registers PreferencesPartition
+    as a Component if a preferences partition is found.
+    """
+    preferences_partition_var = None
+
     # Add partitions
     for partition_config in config.get(CONF_PARTITIONS, []):
         partition_type = partition_config[CONF_TYPE]
@@ -107,7 +113,15 @@ def register_nvm_platform(platform_var, config):
         )
 
         # Add partition to platform
-        cg.add(platform_var.add_partition(partition_config_struct))
+        partition_var = cg.add(platform_var.add_partition(partition_config_struct))
+
+        # If this is a preferences partition, register it as a component
+        if partition_type == "preferences":
+            preferences_partition_var = partition_var
+
+    # If a preferences partition was found, register it as a component
+    if preferences_partition_var is not None:
+        await cg.register_component(preferences_partition_var, {})
 
 
 # Base NVM platform schema (platforms will extend this)
