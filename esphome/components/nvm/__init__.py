@@ -28,6 +28,7 @@ from esphome.const import CONF_ID, CONF_OFFSET, CONF_SIZE, CONF_TYPE
 
 CODEOWNERS = ["@pgolawsk"]
 MULTI_CONF = True
+IS_PLATFORM_COMPONENT = True
 
 # NVM namespace
 nvm_ns = cg.esphome_ns.namespace("nvm")
