@@ -55,8 +55,8 @@ PARTITION_SCHEMA = cv.Schema(
         cv.Required(CONF_TYPE): cv.one_of(
             "preferences", "raw", "key_value", lower=True
         ),
-        cv.Required(CONF_SIZE): cv.All(cv.positive_int, cv.range(min=1)),
-        cv.Optional(CONF_OFFSET, default=0): cv.All(cv.positive_int, cv.range(min=0)),
+        cv.Required(CONF_SIZE): cv.All(cv.positive_int, cv.Range(min=1)),
+        cv.Optional(CONF_OFFSET, default=0): cv.All(cv.positive_int, cv.Range(min=0)),
     }
 )
 
