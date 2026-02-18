@@ -71,6 +71,7 @@ class NvmPartition {
   NvmPlatform *get_parent() const { return parent_; }
 
  protected:
+  friend class NvmPlatform;
   NvmPlatform *parent_;
   PartitionConfig config_;
 };
