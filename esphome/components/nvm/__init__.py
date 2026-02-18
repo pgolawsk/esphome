@@ -39,7 +39,7 @@ NvmPartition = nvm_ns.class_("NvmPartition")
 PreferencesPartition = nvm_ns.class_("PreferencesPartition", NvmPartition, cg.Component)
 RawPartition = nvm_ns.class_("RawPartition", NvmPartition)
 KeyValuePartition = nvm_ns.class_("KeyValuePartition", NvmPartition)
-PartitionType = nvm_ns.enum("PartitionType")
+PartitionType = nvm_ns.enum("PartitionType", is_class=True)
 
 # Partition type enum values
 PARTITION_TYPE_PREFERENCES = PartitionType.PREFERENCES
