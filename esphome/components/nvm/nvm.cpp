@@ -8,6 +8,10 @@ namespace nvm {
 
 static const char *const TAG = "nvm";
 
+// Static member definitions for PreferencesPartition
+const uint32_t PreferencesPartition::MAGIC;
+const uint8_t PreferencesPartition::VERSION;
+
 const char *partition_type_to_string(PartitionType type) {
   switch (type) {
     case PartitionType::PREFERENCES:
