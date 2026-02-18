@@ -91,7 +91,7 @@ async def register_nvm_platform(platform_var, config):
         # Create partition config struct
         partition_id = partition_config[CONF_ID].id
         partition_config_struct = cg.StructInitializer(
-            "PartitionConfig",
+            nvm_ns.class_("PartitionConfig"),
             ("id", partition_id),
             ("type", partition_type_enum),
             ("offset", partition_offset),

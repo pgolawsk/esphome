@@ -115,9 +115,6 @@ async def to_code(config):
     # Create FRAM platform
     var = cg.new_Pvariable(config[CONF_ID])
 
-    # Set I2C address
-    cg.add(var.set_address(config[CONF_ADDRESS]))
-
     # Set FRAM size (from model or custom size)
     if CONF_MODEL in config:
         model_size = FRAM_MODELS[config[CONF_MODEL]]
@@ -125,7 +122,7 @@ async def to_code(config):
     elif CONF_SIZE in config:
         cg.add(var.set_model(config[CONF_SIZE]))
 
-    # Register I2C device
+    # Register I2C device (this sets the address via set_i2c_address)
     await i2c.register_i2c_device(var, config)
 
     # Register partitions
