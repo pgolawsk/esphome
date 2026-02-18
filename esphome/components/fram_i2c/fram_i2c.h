@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nvm.h"
+#include "esphome/components/nvm/nvm.h"
 #include "esphome/components/i2c/i2c.h"
 
 namespace esphome {

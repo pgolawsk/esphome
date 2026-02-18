@@ -19,25 +19,15 @@ Example configuration:
 """
 
 import esphome.codegen as cg
-from esphome.components import i2c
+from esphome.components import i2c, nvm
 import esphome.config_validation as cv
 from esphome.const import CONF_ADDRESS, CONF_ID, CONF_MODEL, CONF_SIZE
-
-from . import (
-    CONF_PARTITIONS,
-    NVM_PLATFORM_SCHEMA,
-    NvmPlatform,
-    nvm_ns,
-    parse_size,
-    register_nvm_platform,
-    validate_preferences_partition_count,
-)
 
 CODEOWNERS = ["@pgolawsk"]
 DEPENDENCIES = ["i2c"]
 
 # FRAM I2C platform class
-FramI2cPlatform = nvm_ns.class_("FramI2cPlatform", NvmPlatform, i2c.I2CDevice)
+FramI2cPlatform = nvm.nvm_ns.class_("FramI2cPlatform", nvm.NvmPlatform, i2c.I2CDevice)
 
 # FRAM model definitions (size in bytes)
 # All models use default I²C address 0x50 (configurable via A0-A2 pins to 0x50-0x57)
@@ -49,7 +39,6 @@ FRAM_MODELS = {
     "MB85RC512": 64 * 1024,  # 512 Kbit = 64 KB (also MB85RC512T)
     "MB85RC1M": 128 * 1024,  # 1 Mbit = 128 KB (also MB85RC1MT)
     "MB85RC2M": 256 * 1024,  # 2 Mbit = 256 KB (also MB85RC2MT)
-    "MB85RC4M": 512 * 1024,  # 4 Mbit = 512 KB (also MB85RC4MT)
     # Infineon/Cypress FRAM Series
     "FM24CL64B": 8 * 1024,  # 64 Kbit = 8 KB
     "FM24CL256B": 32 * 1024,  # 256 Kbit = 32 KB
@@ -79,8 +68,8 @@ def validate_fram_config(config):
         fram_size = config[CONF_SIZE]
 
     # Validate partitions fit within FRAM size
-    for partition in config.get(CONF_PARTITIONS, []):
-        partition_size = parse_size(partition[CONF_SIZE])
+    for partition in config.get(nvm.CONF_PARTITIONS, []):
+        partition_size = nvm.parse_size(partition[CONF_SIZE])
         partition_offset = partition.get("offset", 0)
         partition_end = partition_offset + partition_size
 
@@ -105,7 +94,7 @@ def validate_fram_address(config):
 
 # FRAM I2C platform schema
 CONFIG_SCHEMA = cv.All(
-    NVM_PLATFORM_SCHEMA.extend(
+    nvm.NVM_PLATFORM_SCHEMA.extend(
         {
             cv.GenerateID(): cv.declare_id(FramI2cPlatform),
             cv.Optional(CONF_ADDRESS): cv.i2c_address,
@@ -115,7 +104,7 @@ CONFIG_SCHEMA = cv.All(
     ).extend(i2c.i2c_device_schema(None)),
     validate_fram_address,
     validate_fram_config,
-    validate_preferences_partition_count,
+    nvm.validate_preferences_partition_count,
 )
 
 
@@ -138,7 +127,7 @@ async def to_code(config):
     await i2c.register_i2c_device(var, config)
 
     # Register partitions
-    await register_nvm_platform(var, config)
+    await nvm.register_nvm_platform(var, config)
 
     # Register as component
     await cg.register_component(var, config)
