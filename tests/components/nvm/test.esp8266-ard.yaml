@@ -13,10 +13,10 @@ nvm:
     partitions:
       - id: pref_partition
         type: preferences
-        size: 4KB
+        size: 4kB
       - id: raw_partition
         type: raw
-        size: 8KB
+        size: 8kB
       - id: kv_partition
         type: key_value
-        size: 2KB
+        size: 2kB

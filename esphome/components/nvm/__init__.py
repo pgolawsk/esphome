@@ -13,13 +13,13 @@ Example configuration:
         partitions:
           - id: preferences
             type: preferences
-            size: 4KB
+            size: 4kB
           - id: sensor_cache
             type: raw
-            size: 12KB
+            size: 12kB
           - id: config
             type: key_value
-            size: 2KB
+            size: 2kB
 """
 
 import esphome.codegen as cg
@@ -56,28 +56,10 @@ PARTITION_SCHEMA = cv.Schema(
         cv.Required(CONF_TYPE): cv.one_of(
             "preferences", "raw", "key_value", lower=True
         ),
-        cv.Required(CONF_SIZE): cv.All(cv.positive_int, cv.Range(min=1)),
+        cv.Required(CONF_SIZE): cv.All(cv.validate_bytes, cv.Range(min=1)),
         cv.Optional(CONF_OFFSET, default=0): cv.All(cv.positive_int, cv.Range(min=0)),
     }
 )
-
-
-def parse_size(value):
-    """Parse size string like '4KB' or '1024' to bytes."""
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        value = value.strip().upper()
-        multipliers = {
-            "B": 1,
-            "KB": 1024,
-            "MB": 1024 * 1024,
-        }
-        for suffix, mult in multipliers.items():
-            if value.endswith(suffix):
-                return int(value[: -len(suffix)]) * mult
-        return int(value)
-    raise cv.Invalid(f"Invalid size: {value}")
 
 
 async def register_nvm_platform(platform_var, config):
@@ -91,7 +73,9 @@ async def register_nvm_platform(platform_var, config):
     # Add partitions
     for partition_config in config.get(CONF_PARTITIONS, []):
         partition_type = partition_config[CONF_TYPE]
-        partition_size = parse_size(partition_config[CONF_SIZE])
+        partition_size = partition_config[
+            CONF_SIZE
+        ]  # Already converted to int by cv.validate_bytes
         partition_offset = partition_config[CONF_OFFSET]
 
         # Determine partition type enum
