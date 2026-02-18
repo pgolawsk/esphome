@@ -85,6 +85,7 @@ async def register_nvm_platform(platform_var, config):
     as a Component if a preferences partition is found.
     """
     preferences_partition_var = None
+    preferences_partition_count = 0
 
     # Add partitions
     for partition_config in config.get(CONF_PARTITIONS, []):
@@ -95,6 +96,13 @@ async def register_nvm_platform(platform_var, config):
         # Determine partition type enum
         if partition_type == "preferences":
             partition_type_enum = PARTITION_TYPE_PREFERENCES
+            preferences_partition_count += 1
+            if preferences_partition_count > 1:
+                raise cv.Invalid(
+                    "Only one preferences partition is allowed. "
+                    "Multiple preferences partitions would conflict as they all replace "
+                    "the global preferences backend."
+                )
         elif partition_type == "raw":
             partition_type_enum = PARTITION_TYPE_RAW
         elif partition_type == "key_value":
