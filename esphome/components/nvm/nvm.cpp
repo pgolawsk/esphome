@@ -63,6 +63,16 @@ void NvmPlatform::setup() {
     }
   }
 
+  // Call setup() on preferences partitions to activate them as global preferences backend
+  // PreferencesPartition inherits from Component, so we need to call its setup() method
+  for (const auto &partition : partitions_) {
+    if (partition->get_type() == PartitionType::PREFERENCES) {
+      // Cast to PreferencesPartition to call its setup() method
+      auto *pref_partition = static_cast<PreferencesPartition *>(partition.get());
+      pref_partition->setup();
+    }
+  }
+
   ESP_LOGCONFIG(TAG, "NVM Platform initialized with %zu partitions", partitions_.size());
 }
 
