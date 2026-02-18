@@ -39,7 +39,7 @@ DEPENDENCIES = ["i2c"]
 # FRAM I2C platform class
 FramI2cPlatform = nvm_ns.class_("FramI2cPlatform", NvmPlatform, i2c.I2CDevice)
 
-# FRAM/EEPROM model definitions (size in bytes)
+# FRAM model definitions (size in bytes)
 # All models use default I²C address 0x50 (configurable via A0-A2 pins to 0x50-0x57)
 FRAM_MODELS = {
     # Fujitsu MB85RC FRAM Series
@@ -48,23 +48,13 @@ FRAM_MODELS = {
     "MB85RC256": 32 * 1024,  # 256 Kbit = 32 KB (also MB85RC256V)
     "MB85RC512": 64 * 1024,  # 512 Kbit = 64 KB (also MB85RC512T)
     "MB85RC1M": 128 * 1024,  # 1 Mbit = 128 KB (also MB85RC1MT)
-    "MB85RC2M": 256 * 1024,  # 2 Mbit = 256 KB (MB85RC2MT)
+    "MB85RC2M": 256 * 1024,  # 2 Mbit = 256 KB (also MB85RC2MT)
+    "MB85RC4M": 512 * 1024,  # 4 Mbit = 512 KB (also MB85RC4MT)
     # Infineon/Cypress FRAM Series
     "FM24CL64B": 8 * 1024,  # 64 Kbit = 8 KB
     "FM24CL256B": 32 * 1024,  # 256 Kbit = 32 KB
     "CY15B104QSN": 512 * 1024,  # 4 Mbit = 512 KB
-    # Microchip 24LC EEPROM Series
-    "24LC64": 8 * 1024,  # 64 Kbit = 8 KB
-    "24LC256": 32 * 1024,  # 256 Kbit = 32 KB
-    "24LC512": 64 * 1024,  # 512 Kbit = 64 KB
-    "24LC1025": 128 * 1024,  # 1 Mbit = 128 KB (special: responds to 0x50 and 0x54)
-    # Atmel/Microchip AT24C EEPROM Series
-    "AT24C64": 8 * 1024,  # 64 Kbit = 8 KB
-    "AT24C256": 32 * 1024,  # 256 Kbit = 32 KB
-    "AT24C512": 64 * 1024,  # 512 Kbit = 64 KB
-    # ST M24C EEPROM Series
-    "M24C64": 8 * 1024,  # 64 Kbit = 8 KB
-    "M24C512": 64 * 1024,  # 512 Kbit = 64 KB
+    "CY15B108QSN": 1024 * 1024,  # 8 Mbit = 1 MB
 }
 
 
