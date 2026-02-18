@@ -85,10 +85,11 @@ bool FramI2cPlatform::read_bytes_16(uint32_t memaddr, uint8_t *data, size_t len)
   addr_buf[0] = (memaddr >> 8) & 0xFF;
   addr_buf[1] = memaddr & 0xFF;
 
+  ESP_LOGV(TAG, "Read addr=0x%04X, len=%zu", memaddr, len);
   // Write address, then read data
   i2c::ErrorCode err = this->write_read(addr_buf, 2, data, len);
   if (err != i2c::ERROR_OK) {
-    ESP_LOGE(TAG, "Read failed at address %u: error %d", memaddr, err);
+    ESP_LOGW(TAG, "Read failed at address 0x%04X: error %d", memaddr, err);
     return false;
   }
 
@@ -99,6 +100,7 @@ bool FramI2cPlatform::write_bytes_16(uint32_t memaddr, const uint8_t *data, size
   // Standard I2C FRAM write: [device_addr+W][addr_high][addr_low][data...]
   // FRAM doesn't need page write delays like EEPROM
 
+  ESP_LOGV(TAG, "Write addr=0x%04X, len=%zu", memaddr, len);
   // Prepare buffer: address + data (using unique_ptr to avoid STL vector overhead)
   auto buf = std::make_unique<uint8_t[]>(2 + len);
   buf[0] = (memaddr >> 8) & 0xFF;
@@ -107,7 +109,7 @@ bool FramI2cPlatform::write_bytes_16(uint32_t memaddr, const uint8_t *data, size
 
   i2c::ErrorCode err = this->write(buf.get(), 2 + len);
   if (err != i2c::ERROR_OK) {
-    ESP_LOGE(TAG, "Write failed at address %u: error %d", memaddr, err);
+    ESP_LOGW(TAG, "Write failed at address 0x%04X: error %d", memaddr, err);
     return false;
   }
 
@@ -126,10 +128,11 @@ bool FramI2cPlatform::read_bytes_ext(uint32_t memaddr, uint8_t *data, size_t len
   addr_buf[0] = (memaddr >> 8) & 0xFF;
   addr_buf[1] = memaddr & 0xFF;
 
+  ESP_LOGV(TAG, "Read ext addr=0x%06X, len=%zu, i2c_addr=0x%02X", memaddr, len, modified_address);
   // Use modified address for this transaction
   i2c::ErrorCode err = this->bus_->write_readv(modified_address, addr_buf, 2, data, len);
   if (err != i2c::ERROR_OK) {
-    ESP_LOGE(TAG, "Extended read failed at address %u: error %d", memaddr, err);
+    ESP_LOGW(TAG, "Extended read failed at address 0x%06X: error %d", memaddr, err);
     return false;
   }
 
@@ -141,6 +144,7 @@ bool FramI2cPlatform::write_bytes_ext(uint32_t memaddr, const uint8_t *data, siz
   uint8_t addr_high = (memaddr >> 16) & 0x03;
   uint8_t modified_address = (this->address_ & 0xFC) | addr_high;
 
+  ESP_LOGV(TAG, "Write ext addr=0x%06X, len=%zu, i2c_addr=0x%02X", memaddr, len, modified_address);
   // Using unique_ptr to avoid STL vector overhead
   auto buf = std::make_unique<uint8_t[]>(2 + len);
   buf[0] = (memaddr >> 8) & 0xFF;
@@ -149,7 +153,7 @@ bool FramI2cPlatform::write_bytes_ext(uint32_t memaddr, const uint8_t *data, siz
 
   i2c::ErrorCode err = this->bus_->write(modified_address, buf.get(), 2 + len);
   if (err != i2c::ERROR_OK) {
-    ESP_LOGE(TAG, "Extended write failed at address %u: error %d", memaddr, err);
+    ESP_LOGW(TAG, "Extended write failed at address 0x%06X: error %d", memaddr, err);
     return false;
   }
 

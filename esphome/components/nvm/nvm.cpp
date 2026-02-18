@@ -35,6 +35,7 @@ bool NvmPartition::read(uint32_t offset, uint8_t *data, size_t len) {
              config_.size);
     return false;
   }
+  ESP_LOGV(TAG, "Partition '%s' read: offset=%u, len=%zu", config_.id.c_str(), offset, len);
   return parent_->read_bytes(config_.offset + offset, data, len);
 }
 
@@ -44,6 +45,7 @@ bool NvmPartition::write(uint32_t offset, const uint8_t *data, size_t len) {
              config_.size);
     return false;
   }
+  ESP_LOGV(TAG, "Partition '%s' write: offset=%u, len=%zu", config_.id.c_str(), offset, len);
   return parent_->write_bytes(config_.offset + offset, data, len);
 }
 
