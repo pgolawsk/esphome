@@ -27,6 +27,7 @@ import esphome.config_validation as cv
 from esphome.const import CONF_ID, CONF_OFFSET, CONF_SIZE, CONF_TYPE
 
 CODEOWNERS = ["@pgolawsk"]
+MULTI_CONF = True
 
 # NVM namespace
 nvm_ns = cg.esphome_ns.namespace("nvm")
@@ -85,7 +86,6 @@ async def register_nvm_platform(platform_var, config):
     as a Component if a preferences partition is found.
     """
     preferences_partition_var = None
-    preferences_partition_count = 0
 
     # Add partitions
     for partition_config in config.get(CONF_PARTITIONS, []):
@@ -96,13 +96,6 @@ async def register_nvm_platform(platform_var, config):
         # Determine partition type enum
         if partition_type == "preferences":
             partition_type_enum = PARTITION_TYPE_PREFERENCES
-            preferences_partition_count += 1
-            if preferences_partition_count > 1:
-                raise cv.Invalid(
-                    "Only one preferences partition is allowed. "
-                    "Multiple preferences partitions would conflict as they all replace "
-                    "the global preferences backend."
-                )
         elif partition_type == "raw":
             partition_type_enum = PARTITION_TYPE_RAW
         elif partition_type == "key_value":
@@ -132,6 +125,16 @@ async def register_nvm_platform(platform_var, config):
         await cg.register_component(preferences_partition_var, {})
 
 
+# Track preferences partition count globally (for MULTI_CONF validation)
+# Using a list to avoid global statement issues
+_preferences_partition_count = [0]
+
+
+def reset_preferences_partition_count():
+    """Reset the global preferences partition counter. Used in tests."""
+    _preferences_partition_count[0] = 0
+
+
 # Base NVM platform schema (platforms will extend this)
 NVM_PLATFORM_SCHEMA = cv.Schema(
     {
@@ -139,3 +142,18 @@ NVM_PLATFORM_SCHEMA = cv.Schema(
         cv.Optional(CONF_PARTITIONS, default=[]): cv.ensure_list(PARTITION_SCHEMA),
     }
 )
+
+
+def validate_preferences_partition_count(config):
+    """Validate that only one preferences partition exists across all NVM devices."""
+    for partition in config.get(CONF_PARTITIONS, []):
+        if partition[CONF_TYPE] == "preferences":
+            _preferences_partition_count[0] += 1
+            if _preferences_partition_count[0] > 1:
+                raise cv.Invalid(
+                    "Only one preferences partition is allowed across all NVM devices. "
+                    "Multiple preferences partitions would conflict as they all replace "
+                    "the global preferences backend."
+                )
+
+    return config
