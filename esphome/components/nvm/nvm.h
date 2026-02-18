@@ -89,7 +89,7 @@ class NvmPartition {
 class NvmPlatform : public Component {
  public:
   NvmPlatform() = default;
-  ~NvmPlatform() override = default;
+  ~NvmPlatform() = default;
 
   // ========== Abstract interface - must be implemented by platform ==========
 

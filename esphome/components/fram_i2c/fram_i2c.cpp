@@ -127,7 +127,7 @@ bool FramI2cPlatform::read_bytes_ext(uint32_t memaddr, uint8_t *data, size_t len
   addr_buf[1] = memaddr & 0xFF;
 
   // Use modified address for this transaction
-  i2c::ErrorCode err = this->bus_->write_read(modified_address, addr_buf, 2, data, len);
+  i2c::ErrorCode err = this->bus_->write_readv(modified_address, addr_buf, 2, data, len);
   if (err != i2c::ERROR_OK) {
     ESP_LOGE(TAG, "Extended read failed at address %u: error %d", memaddr, err);
     return false;
