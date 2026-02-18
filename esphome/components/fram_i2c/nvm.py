@@ -69,7 +69,9 @@ def validate_fram_config(config):
 
     # Validate partitions fit within FRAM size
     for partition in config.get(nvm.CONF_PARTITIONS, []):
-        partition_size = nvm.parse_size(partition[CONF_SIZE])
+        partition_size = partition[
+            CONF_SIZE
+        ]  # Already converted to int by cv.validate_bytes
         partition_offset = partition.get("offset", 0)
         partition_end = partition_offset + partition_size
 
