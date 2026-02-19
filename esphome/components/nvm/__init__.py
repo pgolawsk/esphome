@@ -107,11 +107,7 @@ PARTITION_SCHEMA = cv.All(
 
 
 async def register_nvm_platform(platform_var, config):
-    """Register an NVM platform with its partitions.
-
-    Note: PreferencesPartition is registered as a Component in C++ via App.register_component()
-    in add_partition(), so we don't need to register it here.
-    """
+    """Register an NVM platform with its partitions."""
     # Add partitions
     for partition_config in config.get(CONF_PARTITIONS, []):
         partition_type = partition_config[CONF_TYPE]
