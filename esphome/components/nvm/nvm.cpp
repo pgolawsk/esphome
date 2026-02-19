@@ -78,6 +78,11 @@ void NvmPlatform::dump_config() {
   for (const auto &partition : partitions_) {
     ESP_LOGCONFIG(TAG, "    '%s': type=%s, offset=0x%04X, size=%u bytes", partition->get_id().c_str(),
                   partition_type_to_string(partition->get_type()), partition->get_offset(), partition->get_size());
+    // Call partition-specific dump_config for detailed info
+    if (partition->get_type() == PartitionType::KEY_VALUE) {
+      static_cast<KeyValuePartition *>(partition.get())->dump_config();
+    }
+    // PreferencesPartition has its own dump_config called by Application (it's a Component)
   }
 }
 
@@ -251,6 +256,10 @@ bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t
   this->write(write_offset + 1 + key.size() + 2, value, len);
 
   ESP_LOGV(TAG, "KeyValue '%s' set: key='%s' written at offset=%u", this->get_id().c_str(), key.c_str(), write_offset);
+
+  // Check usage and warn if approaching capacity
+  this->check_usage_();
+
   return true;
 }
 
@@ -335,6 +344,75 @@ bool KeyValuePartition::find_key(const std::string &key, uint32_t &offset, uint3
 void KeyValuePartition::compact() {
   // TODO: Implement compaction to remove deleted entries
   // This would read all valid entries, erase the partition, and rewrite them
+}
+
+uint32_t KeyValuePartition::calculate_used_bytes_() {
+  uint32_t current_offset = 0;
+  uint32_t used_bytes = 0;
+
+  while (current_offset < this->get_size()) {
+    uint8_t key_len;
+    if (!this->read(current_offset, &key_len, 1)) {
+      break;
+    }
+
+    // Check for empty slot
+    if (key_len == 0xFF || key_len == 0x00) {
+      break;
+    }
+
+    // Skip deleted entries (key_len == 0 from erase())
+    if (key_len == 0) {
+      // Read the old value length to skip this entry
+      // Note: after key_len(0), there's still the old key + value_len + value
+      // But we can't know the key length anymore, so we need to scan differently
+      // For now, just count it as used space (compaction will recover it)
+      // Read value_len at offset + 1 (where key would have been, but we don't know its length)
+      // This is a limitation - deleted entries are counted as used until compaction
+      // For simplicity, we'll stop counting here since we can't reliably skip
+      break;
+    }
+
+    // Read value length
+    uint16_t value_len;
+    this->read(current_offset + 1 + key_len, reinterpret_cast<uint8_t *>(&value_len), 2);
+
+    // Add entry size: key_len(1) + key + value_len(2) + value
+    used_bytes += 1 + key_len + 2 + value_len;
+    current_offset += 1 + key_len + 2 + value_len;
+  }
+
+  return used_bytes;
+}
+
+uint32_t KeyValuePartition::get_used_bytes() { return this->calculate_used_bytes_(); }
+
+float KeyValuePartition::get_usage_percent() {
+  uint32_t used = this->get_used_bytes();
+  return (used * 100.0f) / this->get_size();
+}
+
+void KeyValuePartition::check_usage_() {
+  float usage_percent = this->get_usage_percent();
+
+  if (usage_percent > 90.0f) {
+    ESP_LOGW(TAG, "KeyValue partition '%s' is %.0f%% full! Consider increasing partition size", this->get_id().c_str(),
+             usage_percent);
+  } else if (usage_percent > 80.0f && !this->warned_80_percent_) {
+    ESP_LOGW(TAG, "KeyValue partition '%s' is %.0f%% full. Consider increasing partition size soon",
+             this->get_id().c_str(), usage_percent);
+    this->warned_80_percent_ = true;
+  }
+}
+
+void KeyValuePartition::dump_config() {
+  ESP_LOGCONFIG(TAG, "KeyValue Partition '%s':", this->get_id().c_str());
+  ESP_LOGCONFIG(TAG, "  Size: %u bytes", this->get_size());
+  uint32_t used = this->get_used_bytes();
+  if (used > 0) {
+    float usage_percent = this->get_usage_percent();
+    ESP_LOGCONFIG(TAG, "  Used: %u bytes (%.1f%%)", used, usage_percent);
+  }
 }
 
 // ========== PreferencesPartition ==========

@@ -245,6 +245,9 @@ class KeyValuePartition : public NvmPartition {
  public:
   using NvmPartition::NvmPartition;
 
+  /// Dump configuration for debugging
+  void dump_config();
+
   /// Get value by key
   /// @param key Key to look up
   /// @param value Buffer to store value
@@ -281,6 +284,14 @@ class KeyValuePartition : public NvmPartition {
   /// @return true on success
   bool set_string(const std::string &key, const std::string &value);
 
+  /// Get the number of bytes used in the partition
+  /// @return Bytes used (including entry overhead)
+  uint32_t get_used_bytes();
+
+  /// Get the percentage of partition space used
+  /// @return Usage percentage (0-100)
+  float get_usage_percent();
+
  protected:
   /// Find key entry in storage
   /// @param key Key to find
@@ -292,6 +303,15 @@ class KeyValuePartition : public NvmPartition {
 
   /// Compact storage (remove deleted entries)
   void compact();
+
+  /// Calculate used bytes by scanning all entries
+  /// @return Total bytes used
+  uint32_t calculate_used_bytes_();
+
+  /// Check usage and warn if approaching capacity
+  void check_usage_();
+
+  bool warned_80_percent_{false};  ///< Track if 80% warning was issued this boot
 };
 
 }  // namespace nvm
