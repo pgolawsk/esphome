@@ -3,6 +3,7 @@
 #include "esphome/core/log.h"
 
 #include <array>
+#include <cstring>
 
 namespace esphome {
 namespace nvm {
@@ -312,6 +313,30 @@ bool KeyValuePartition::has_key(const std::string &key) {
   uint32_t offset, value_offset;
   uint16_t value_len;
   return this->find_key(key, offset, value_offset, value_len);
+}
+
+int KeyValuePartition::get_string(const std::string &key, char *buf, size_t buf_len, const char *default_value) {
+  if (buf == nullptr || buf_len == 0) {
+    return -1;
+  }
+
+  int len = this->get(key, reinterpret_cast<uint8_t *>(buf), buf_len - 1);
+  if (len < 0) {
+    // Key not found, copy default value
+    if (default_value != nullptr) {
+      size_t default_len = strlen(default_value);
+      size_t copy_len = std::min(default_len, buf_len - 1);
+      memcpy(buf, default_value, copy_len);
+      buf[copy_len] = '\0';
+      return static_cast<int>(copy_len);
+    }
+    buf[0] = '\0';
+    return 0;
+  }
+
+  // Null-terminate the string
+  buf[len] = '\0';
+  return len;
 }
 
 std::string KeyValuePartition::get_string(const std::string &key, const std::string &default_value) {

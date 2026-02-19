@@ -41,7 +41,8 @@ class FramI2cPlatform : public NvmPlatform, public i2c::I2CDevice {
  public:
   void setup() override;
   void dump_config() override;
-  float get_setup_priority() const override { return setup_priority::BUS; }
+  /// Run at IO priority (1500) so hardware is ready before partitions (BUS = 2000)
+  float get_setup_priority() const override { return setup_priority::IO; }
 
   /// Set FRAM model by size
   void set_model(uint32_t size_bytes);

@@ -341,10 +341,19 @@ class KeyValuePartition : public NvmDataPartition, public Component {
   /// @return true if key exists
   bool has_key(const std::string &key);
 
-  /// Get value as string
+  /// Get value as string into a buffer (no heap allocation)
+  /// @param key Key to look up
+  /// @param buf Buffer to store the string
+  /// @param buf_len Size of buffer
+  /// @param default_value Value to use if key not found
+  /// @return Actual length of string (excluding null terminator), or -1 on error
+  int get_string(const std::string &key, char *buf, size_t buf_len, const char *default_value = "");
+
+  /// Get value as string (heap-allocating, use sparingly)
   /// @param key Key to look up
   /// @param default_value Value to return if key not found
   /// @return The stored value or default_value
+  /// @deprecated Use get_string(key, buf, buf_len, default) instead to avoid heap allocation
   std::string get_string(const std::string &key, const std::string &default_value = "");
 
   /// Set value as string
