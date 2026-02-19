@@ -22,11 +22,37 @@ Example configuration:
             size: 2kB
 """
 
+from dataclasses import dataclass, field
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ADDRESS, CONF_ID, CONF_OFFSET, CONF_SIZE, CONF_TYPE
+from esphome.core import CORE
 
 CODEOWNERS = ["@pgolawsk"]
+
+
+# ========== State Management using CORE.data pattern ==========
+# This avoids module-level globals that persist between compilation runs
+
+DOMAIN = "nvm"
+
+
+@dataclass
+class NvmData:
+    """State for NVM component validation across MULTI_CONF instances."""
+
+    preferences_partition_count: int = 0
+    i2c_devices: dict = field(default_factory=dict)
+
+
+def _get_data() -> NvmData:
+    """Get or create NVM state from CORE.data."""
+    if DOMAIN not in CORE.data:
+        CORE.data[DOMAIN] = NvmData()
+    return CORE.data[DOMAIN]
+
+
 MULTI_CONF = True
 IS_PLATFORM_COMPONENT = True
 
@@ -38,7 +64,7 @@ NvmPlatform = nvm_ns.class_("NvmPlatform", cg.Component)
 NvmPartition = nvm_ns.class_("NvmPartition")
 PreferencesPartition = nvm_ns.class_("PreferencesPartition", NvmPartition, cg.Component)
 RawPartition = nvm_ns.class_("RawPartition", NvmPartition)
-KeyValuePartition = nvm_ns.class_("KeyValuePartition", NvmPartition)
+KeyValuePartition = nvm_ns.class_("KeyValuePartition", NvmPartition, cg.Component)
 PartitionType = nvm_ns.enum("PartitionType", is_class=True)
 
 # Partition type enum values
@@ -132,25 +158,7 @@ async def register_nvm_platform(platform_var, config):
         # add_partition(), so setup() will be called automatically by Application
 
 
-# Track preferences partition count globally (for MULTI_CONF validation)
-# Using a list to avoid global statement issues
-_preferences_partition_count = [0]
-
-
-def reset_preferences_partition_count():
-    """Reset the global preferences partition counter. Used in tests."""
-    _preferences_partition_count[0] = 0
-
-
-# Track NVM I2C addresses globally (for MULTI_CONF validation)
-# Key: (i2c_id, address) tuple, Value: config_id
-_nvm_i2c_devices = {}
-
-
-def reset_nvm_i2c_devices():
-    """Reset the global NVM I2C device tracking. Used in tests."""
-    global _nvm_i2c_devices  # noqa: PLW0603
-    _nvm_i2c_devices = {}
+# ========== Validation Functions ==========
 
 
 def validate_nvm_i2c_address(config):
@@ -182,9 +190,10 @@ def validate_nvm_i2c_address(config):
     if hasattr(config_id, "id"):
         config_id = config_id.id
 
-    # Check for duplicate
-    if device_key in _nvm_i2c_devices:
-        existing_id = _nvm_i2c_devices[device_key]
+    # Check for duplicate using CORE.data
+    data = _get_data()
+    if device_key in data.i2c_devices:
+        existing_id = data.i2c_devices[device_key]
         bus_desc = f" on I2C bus '{i2c_id}'" if i2c_id else " on default I2C bus"
         raise cv.Invalid(
             f"Duplicate NVM I2C address 0x{address:02X}{bus_desc}. "
@@ -192,7 +201,7 @@ def validate_nvm_i2c_address(config):
             f"Each NVM device must have a unique I2C address on the same bus."
         )
 
-    _nvm_i2c_devices[device_key] = config_id
+    data.i2c_devices[device_key] = config_id
     return config
 
 
@@ -207,10 +216,11 @@ NVM_PLATFORM_SCHEMA = cv.Schema(
 
 def validate_preferences_partition_count(config):
     """Validate that only one preferences partition exists across all NVM devices."""
+    data = _get_data()
     for partition in config.get(CONF_PARTITIONS, []):
         if partition[CONF_TYPE] == "preferences":
-            _preferences_partition_count[0] += 1
-            if _preferences_partition_count[0] > 1:
+            data.preferences_partition_count += 1
+            if data.preferences_partition_count > 1:
                 raise cv.Invalid(
                     "Only one preferences partition is allowed across all NVM devices. "
                     "Multiple preferences partitions would conflict as they all replace "

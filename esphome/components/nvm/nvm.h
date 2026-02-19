@@ -310,12 +310,12 @@ class RawPartition : public NvmPartition {
 ///   - size: partition size in bytes
 ///   - first_free: offset of first free slot (for O(1) usage tracking)
 /// Entries: [key_len: 1 byte][key: N bytes][value_len: 2 bytes][value: M bytes]
-class KeyValuePartition : public NvmDataPartition {
+class KeyValuePartition : public NvmDataPartition, public Component {
  public:
   using NvmDataPartition::NvmDataPartition;
 
   /// Dump configuration for debugging
-  void dump_config();
+  void dump_config() override;
 
   /// Get value by key
   /// @param key Key to look up
