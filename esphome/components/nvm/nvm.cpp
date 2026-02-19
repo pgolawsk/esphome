@@ -437,10 +437,10 @@ float KeyValuePartition::get_usage_percent() {
 void KeyValuePartition::check_usage_() {
   float usage_percent = this->get_usage_percent();
 
-  if (usage_percent > 90.0f) {
+  if (usage_percent > WARNING_L2_PERCENT) {
     ESP_LOGW(TAG, "KeyValue partition '%s' is %.0f%% full! Consider increasing partition size", this->get_id().c_str(),
              usage_percent);
-  } else if (usage_percent > 80.0f && !this->warned_L1_percent_) {
+  } else if (usage_percent > WARNING_L1_PERCENT && !this->warned_L1_percent_) {
     ESP_LOGW(TAG, "KeyValue partition '%s' is %.0f%% full. Consider increasing partition size soon",
              this->get_id().c_str(), usage_percent);
     this->warned_L1_percent_ = true;
@@ -824,10 +824,10 @@ void PreferencesPartition::ensure_initialized_() {
     float usage_percent = (this->pool_used_ * 100.0f) / pool_size;
     ESP_LOGD(TAG, "Pool usage: %u/%u bytes (%.1f%%)", this->pool_used_, pool_size, usage_percent);
 
-    // Warn if pool is too small (over 90% at startup)
-    if (usage_percent > 90.0f) {
+    // Warn if pool is too small (over WARNING_L2_PERCENT at startup)
+    if (usage_percent > WARNING_L2_PERCENT) {
       ESP_LOGW(TAG, "Pool is %.0f%% full! Consider increasing partition size", usage_percent);
-    } else if (usage_percent > 80.0f) {
+    } else if (usage_percent > WARNING_L1_PERCENT) {
       ESP_LOGW(TAG, "Pool is %.0f%% full. Consider increasing partition size soon", usage_percent);
       this->warned_L1_percent_ = true;
     }
@@ -1016,9 +1016,9 @@ bool NvmPreferenceBackend::save(const uint8_t *data, size_t len) {
     this->partition_->write(12, reinterpret_cast<uint8_t *>(&new_used), 4);
   }
 
-  // Check for 80% warning
+  // Check for WARNING_L1_PERCENT warning
   float usage_percent = (this->partition_->pool_used_ * 100.0f) / this->partition_->get_size();
-  if (usage_percent > 80.0f && !this->partition_->warned_L1_percent_) {
+  if (usage_percent > WARNING_L1_PERCENT && !this->partition_->warned_L1_percent_) {
     ESP_LOGW(TAG, "Pool is %.0f%% full (%u/%u bytes). Consider increasing partition size", usage_percent,
              this->partition_->pool_used_, this->partition_->get_size());
     this->partition_->warned_L1_percent_ = true;
