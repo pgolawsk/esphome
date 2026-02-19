@@ -165,11 +165,11 @@ class NvmDataPartition : public NvmPartition {
   static const uint8_t VERSION = 1;          ///< Version 1 - unified across all partitions
 
   /// Usage warning thresholds
-  static const float WARNING_80_PERCENT = 80.0f;
-  static const float WARNING_90_PERCENT = 90.0f;
+  static constexpr float WARNING_L1_PERCENT = 80.0f;
+  static constexpr float WARNING_L2_PERCENT = 90.0f;
 
   NvmDataPartition(NvmPlatform *parent, const PartitionConfig &config)
-      : NvmPartition(parent, config), initialized_(false), warned_80_percent_(false) {}
+      : NvmPartition(parent, config), initialized_(false), warned_L1_percent_(false) {}
 
   /// Validate header and check if reinitialization is needed
   /// @param expected_type The expected partition type
@@ -209,7 +209,7 @@ class NvmDataPartition : public NvmPartition {
   float get_usage_percent();
 
   bool initialized_;        ///< Track if partition has been initialized
-  bool warned_80_percent_;  ///< Track if 80% warning was issued this boot
+  bool warned_L1_percent_;  ///< Track if L1 warning was issued this boot
 };
 
 /// Specialized partition for preferences storage

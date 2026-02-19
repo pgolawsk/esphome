@@ -19,8 +19,6 @@ const uint8_t NvmDataPartition::OFF_FIRST_FREE;
 const uint32_t NvmDataPartition::HEADER_SIZE;
 const uint32_t NvmDataPartition::MAGIC;
 const uint8_t NvmDataPartition::VERSION;
-const float NvmDataPartition::WARNING_80_PERCENT;
-const float NvmDataPartition::WARNING_90_PERCENT;
 
 const char *partition_type_to_string(PartitionType type) {
   switch (type) {
@@ -442,10 +440,10 @@ void KeyValuePartition::check_usage_() {
   if (usage_percent > 90.0f) {
     ESP_LOGW(TAG, "KeyValue partition '%s' is %.0f%% full! Consider increasing partition size", this->get_id().c_str(),
              usage_percent);
-  } else if (usage_percent > 80.0f && !this->warned_80_percent_) {
+  } else if (usage_percent > 80.0f && !this->warned_L1_percent_) {
     ESP_LOGW(TAG, "KeyValue partition '%s' is %.0f%% full. Consider increasing partition size soon",
              this->get_id().c_str(), usage_percent);
-    this->warned_80_percent_ = true;
+    this->warned_L1_percent_ = true;
   }
 }
 
@@ -635,13 +633,13 @@ void NvmDataPartition::update_first_free_(uint32_t first_free) {
 void NvmDataPartition::check_usage_warnings_(uint32_t used, uint32_t total) {
   float usage_percent = (used * 100.0f) / total;
 
-  if (usage_percent > WARNING_90_PERCENT) {
+  if (usage_percent > WARNING_L2_PERCENT) {
     ESP_LOGW(TAG, "Partition '%s' is %.0f%% full! Consider increasing partition size", this->get_id().c_str(),
              usage_percent);
-  } else if (usage_percent > WARNING_80_PERCENT && !this->warned_80_percent_) {
+  } else if (usage_percent > WARNING_L1_PERCENT && !this->warned_L1_percent_) {
     ESP_LOGW(TAG, "Partition '%s' is %.0f%% full. Consider increasing partition size soon", this->get_id().c_str(),
              usage_percent);
-    this->warned_80_percent_ = true;
+    this->warned_L1_percent_ = true;
   }
 }
 
@@ -734,7 +732,7 @@ bool PreferencesPartition::reset() {
   this->write(12, reinterpret_cast<uint8_t *>(&first_free), 4);
 
   this->pool_used_ = POOL_HEADER_SIZE;
-  this->warned_80_percent_ = false;
+  this->warned_L1_percent_ = false;
   ESP_LOGD(TAG, "Factory reset: NVM preferences cleared");
   return true;
 }
@@ -831,7 +829,7 @@ void PreferencesPartition::ensure_initialized_() {
       ESP_LOGW(TAG, "Pool is %.0f%% full! Consider increasing partition size", usage_percent);
     } else if (usage_percent > 80.0f) {
       ESP_LOGW(TAG, "Pool is %.0f%% full. Consider increasing partition size soon", usage_percent);
-      this->warned_80_percent_ = true;
+      this->warned_L1_percent_ = true;
     }
   }
 
@@ -1020,10 +1018,10 @@ bool NvmPreferenceBackend::save(const uint8_t *data, size_t len) {
 
   // Check for 80% warning
   float usage_percent = (this->partition_->pool_used_ * 100.0f) / this->partition_->get_size();
-  if (usage_percent > 80.0f && !this->partition_->warned_80_percent_) {
+  if (usage_percent > 80.0f && !this->partition_->warned_L1_percent_) {
     ESP_LOGW(TAG, "Pool is %.0f%% full (%u/%u bytes). Consider increasing partition size", usage_percent,
              this->partition_->pool_used_, this->partition_->get_size());
-    this->partition_->warned_80_percent_ = true;
+    this->partition_->warned_L1_percent_ = true;
   }
 
   return true;
