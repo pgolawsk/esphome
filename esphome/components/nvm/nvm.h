@@ -145,6 +145,73 @@ class NvmPlatform : public Component {
   void calculate_partition_offsets();
 };
 
+/// Base class for data partitions (Preferences and KeyValue)
+///
+/// This class provides common functionality for both partition types,
+/// including header management, validation, and usage tracking.
+class NvmDataPartition : public NvmPartition {
+ protected:
+  /// Header offsets
+  static const uint8_t OFF_MAGIC = 0;
+  static const uint8_t OFF_VERSION = 4;
+  static const uint8_t OFF_TYPE = 5;
+  static const uint8_t OFF_RESERVED = 6;
+  static const uint8_t OFF_SIZE = 8;
+  static const uint8_t OFF_FIRST_FREE = 12;
+
+  /// Header constants
+  static const uint32_t HEADER_SIZE = 16;  ///< magic(4) + version(1) + type(1) + reserved(2) + size(4) + first_free(4)
+  static const uint32_t MAGIC = 0x4B565354;  ///< "KVST" - unified magic for all NVM partitions
+  static const uint8_t VERSION = 1;          ///< Version 1 - unified across all partitions
+
+  /// Usage warning thresholds
+  static const float WARNING_80_PERCENT = 80.0f;
+  static const float WARNING_90_PERCENT = 90.0f;
+
+  NvmDataPartition(NvmPlatform *parent, const PartitionConfig &config)
+      : NvmPartition(parent, config), initialized_(false), warned_80_percent_(false) {}
+
+  /// Validate header and check if reinitialization is needed
+  /// @param expected_type The expected partition type
+  /// @return true if header is valid and matches expected type
+  bool validate_header_(PartitionType expected_type);
+
+  /// Write the header to the partition
+  /// @param partition_size Total size of the partition
+  /// @param type Partition type
+  /// @param first_free First free offset (usually HEADER_SIZE)
+  void write_header_(uint32_t partition_size, PartitionType type, uint32_t first_free);
+
+  /// Read first_free offset from header
+  /// @return First free offset, or HEADER_SIZE if not set
+  uint32_t read_first_free_();
+
+  /// Update first_free offset in header
+  /// @param first_free New first free offset
+  void update_first_free_(uint32_t first_free);
+
+  /// Check usage and warn if approaching capacity
+  /// @param used Number of bytes used
+  /// @param total Total partition size
+  void check_usage_warnings_(uint32_t used, uint32_t total);
+
+  /// Log a header mismatch
+  /// @param issue Description of the issue
+  /// @param actual Actual value found
+  /// @param expected Expected value
+  void log_mismatch_(const char *issue, uint32_t actual, uint32_t expected);
+
+ public:
+  virtual ~NvmDataPartition() = default;
+
+  /// Get the percentage of partition space used
+  /// @return Usage percentage (0-100)
+  float get_usage_percent();
+
+  bool initialized_;        ///< Track if partition has been initialized
+  bool warned_80_percent_;  ///< Track if 80% warning was issued this boot
+};
+
 /// Specialized partition for preferences storage
 ///
 /// This partition type integrates with ESPHome's preferences system,
@@ -153,9 +220,9 @@ class NvmPlatform : public Component {
 ///
 /// When created, this partition automatically registers itself as the
 /// global preferences backend, replacing the default flash-based storage.
-class PreferencesPartition : public NvmPartition, public Component, public ESPPreferences {
+class PreferencesPartition : public NvmDataPartition, public Component, public ESPPreferences {
  public:
-  using NvmPartition::NvmPartition;
+  using NvmDataPartition::NvmDataPartition;
 
   /// Setup the preferences backend
   void setup() override;
@@ -182,16 +249,8 @@ class PreferencesPartition : public NvmPartition, public Component, public ESPPr
   uint32_t calculate_pool_used_();
 
   ESPPreferences *nvs_preferences_{nullptr};  ///< Original NVS preferences for delegated keys
-  bool initialized_{false};
   bool pool_cleared_{false};
   uint32_t pool_used_{0};
-  bool warned_80_percent_{false};
-
-  // Pool header constants (unified with KeyValuePartition)
-  static const uint32_t POOL_HEADER_SIZE =
-      16;  ///< magic(4) + version(1) + type(1) + reserved(2) + size(4) + first_free(4)
-  static const uint32_t MAGIC = 0x4B565354;  ///< "KVST" - unified magic for all NVM partitions
-  static const uint8_t VERSION = 1;          ///< Version 1 - unified across all partitions
 };
 
 /// Backend for individual preference objects
@@ -249,9 +308,9 @@ class RawPartition : public NvmPartition {
 ///   - size: partition size in bytes
 ///   - first_free: offset of first free slot (for O(1) usage tracking)
 /// Entries: [key_len: 1 byte][key: N bytes][value_len: 2 bytes][value: M bytes]
-class KeyValuePartition : public NvmPartition {
+class KeyValuePartition : public NvmDataPartition {
  public:
-  using NvmPartition::NvmPartition;
+  using NvmDataPartition::NvmDataPartition;
 
   /// Dump configuration for debugging
   void dump_config();
@@ -324,14 +383,6 @@ class KeyValuePartition : public NvmPartition {
 
   /// Check usage and warn if approaching capacity
   void check_usage_();
-
-  bool initialized_{false};        ///< Track if partition has been initialized
-  bool warned_80_percent_{false};  ///< Track if 80% warning was issued this boot
-
-  // Header constants
-  static const uint32_t HEADER_SIZE = 16;  ///< magic(4) + version(1) + type(1) + reserved(2) + size(4) + first_free(4)
-  static const uint32_t MAGIC = 0x4B565354;  ///< "KVST" in little-endian
-  static const uint8_t VERSION = 1;
 };
 
 }  // namespace nvm

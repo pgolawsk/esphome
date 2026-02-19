@@ -9,9 +9,18 @@ namespace nvm {
 
 static const char *const TAG = "nvm";
 
-// Static member definitions for PreferencesPartition
-const uint32_t PreferencesPartition::MAGIC;
-const uint8_t PreferencesPartition::VERSION;
+// Static member definitions for NvmDataPartition
+const uint8_t NvmDataPartition::OFF_MAGIC;
+const uint8_t NvmDataPartition::OFF_VERSION;
+const uint8_t NvmDataPartition::OFF_TYPE;
+const uint8_t NvmDataPartition::OFF_RESERVED;
+const uint8_t NvmDataPartition::OFF_SIZE;
+const uint8_t NvmDataPartition::OFF_FIRST_FREE;
+const uint32_t NvmDataPartition::HEADER_SIZE;
+const uint32_t NvmDataPartition::MAGIC;
+const uint8_t NvmDataPartition::VERSION;
+const float NvmDataPartition::WARNING_80_PERCENT;
+const float NvmDataPartition::WARNING_90_PERCENT;
 
 const char *partition_type_to_string(PartitionType type) {
   switch (type) {
@@ -568,6 +577,84 @@ void KeyValuePartition::clear_partition_() {
   ESP_LOGVV(TAG, "KeyValue '%s' verify: magic=0x%08X", this->get_id().c_str(), verify_magic);
 }
 
+// ========== NvmDataPartition ==========
+
+bool NvmDataPartition::validate_header_(PartitionType expected_type) {
+  uint32_t magic = 0;
+  this->read(OFF_MAGIC, reinterpret_cast<uint8_t *>(&magic), 4);
+
+  if (magic != MAGIC) {
+    return false;
+  }
+
+  uint8_t version = 0;
+  this->read(OFF_VERSION, &version, 1);
+  if (version != VERSION) {
+    return false;
+  }
+
+  uint8_t type = 0;
+  this->read(OFF_TYPE, &type, 1);
+  if (type != static_cast<uint8_t>(expected_type)) {
+    return false;
+  }
+
+  uint32_t stored_size = 0;
+  this->read(OFF_SIZE, reinterpret_cast<uint8_t *>(&stored_size), 4);
+  if (stored_size != this->get_size()) {
+    return false;
+  }
+
+  return true;
+}
+
+void NvmDataPartition::write_header_(uint32_t partition_size, PartitionType type, uint32_t first_free) {
+  uint32_t magic = MAGIC;
+  uint8_t version = VERSION;
+  uint8_t type_val = static_cast<uint8_t>(type);
+  uint16_t reserved = 0;
+
+  this->write(OFF_MAGIC, reinterpret_cast<uint8_t *>(&magic), 4);
+  this->write(OFF_VERSION, &version, 1);
+  this->write(OFF_TYPE, &type_val, 1);
+  this->write(OFF_RESERVED, reinterpret_cast<uint8_t *>(&reserved), 2);
+  this->write(OFF_SIZE, reinterpret_cast<uint8_t *>(&partition_size), 4);
+  this->write(OFF_FIRST_FREE, reinterpret_cast<uint8_t *>(&first_free), 4);
+}
+
+uint32_t NvmDataPartition::read_first_free_() {
+  uint32_t first_free = HEADER_SIZE;
+  this->read(OFF_FIRST_FREE, reinterpret_cast<uint8_t *>(&first_free), 4);
+  return first_free;
+}
+
+void NvmDataPartition::update_first_free_(uint32_t first_free) {
+  this->write(OFF_FIRST_FREE, reinterpret_cast<uint8_t *>(&first_free), 4);
+}
+
+void NvmDataPartition::check_usage_warnings_(uint32_t used, uint32_t total) {
+  float usage_percent = (used * 100.0f) / total;
+
+  if (usage_percent > WARNING_90_PERCENT) {
+    ESP_LOGW(TAG, "Partition '%s' is %.0f%% full! Consider increasing partition size", this->get_id().c_str(),
+             usage_percent);
+  } else if (usage_percent > WARNING_80_PERCENT && !this->warned_80_percent_) {
+    ESP_LOGW(TAG, "Partition '%s' is %.0f%% full. Consider increasing partition size soon", this->get_id().c_str(),
+             usage_percent);
+    this->warned_80_percent_ = true;
+  }
+}
+
+void NvmDataPartition::log_mismatch_(const char *issue, uint32_t actual, uint32_t expected) {
+  ESP_LOGW(TAG, "Partition '%s' %s (actual=0x%08X, expected=0x%08X)", this->get_id().c_str(), issue, actual, expected);
+}
+
+float NvmDataPartition::get_usage_percent() {
+  uint32_t first_free = this->read_first_free_();
+  float usage = (first_free * 100.0f) / this->get_size();
+  return usage;
+}
+
 // ========== PreferencesPartition ==========
 
 void PreferencesPartition::setup() {
@@ -830,7 +917,7 @@ uint32_t NvmPreferenceBackend::find_key_(uint32_t key_hash) {
   }
 
   uint32_t pool_size = this->partition_->get_size();
-  uint32_t addr = PreferencesPartition::POOL_HEADER_SIZE;
+  uint32_t addr = NvmDataPartition::HEADER_SIZE;
   uint32_t iterations = 0;
   const uint32_t max_iterations = 100;  // Safety limit
 
