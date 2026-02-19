@@ -109,7 +109,7 @@ NvmPartition *NvmPlatform::add_partition(const PartitionConfig &config) {
       return nullptr;
   }
 
-  ESP_LOGI(TAG, "Created partition '%s': type=%s, offset=0x%04X, size=%u bytes", config.id.c_str(),
+  ESP_LOGI(TAG, "Configured partition '%s': type=%s, offset=0x%04X, size=%u bytes", config.id.c_str(),
            partition_type_to_string(config.type), config.offset, config.size);
 
   partitions_.push_back(std::move(partition));

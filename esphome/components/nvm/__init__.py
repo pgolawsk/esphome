@@ -83,11 +83,9 @@ PARTITION_SCHEMA = cv.All(
 async def register_nvm_platform(platform_var, config):
     """Register an NVM platform with its partitions.
 
-    This function also automatically registers PreferencesPartition
-    as a Component if a preferences partition is found.
+    Note: PreferencesPartition is registered as a Component in C++ via App.register_component()
+    in add_partition(), so we don't need to register it here.
     """
-    preferences_partition_var = None
-
     # Add partitions
     for partition_config in config.get(CONF_PARTITIONS, []):
         partition_type = partition_config[CONF_TYPE]
@@ -123,21 +121,15 @@ async def register_nvm_platform(platform_var, config):
         # Pvariable both declares the global variable AND registers it with CORE
         # so it can be accessed via id() in lambdas
         # Note: add_partition() returns NvmPartition*, we cast to the derived type
-        partition_var = cg.Pvariable(
+        cg.Pvariable(
             partition_id_obj,
             cg.RawExpression(
                 f"static_cast<{target_class}*>"
                 f"({platform_var.add_partition(partition_config_struct)})"
             ),
         )
-
-        # If this is a preferences partition, register it as a component
-        if partition_type == "preferences":
-            preferences_partition_var = partition_var
-
-    # If a preferences partition was found, register it as a component
-    if preferences_partition_var is not None:
-        await cg.register_component(preferences_partition_var, {})
+        # Note: PreferencesPartition is registered with App.register_component() in C++
+        # add_partition(), so setup() will be called automatically by Application
 
 
 # Track preferences partition count globally (for MULTI_CONF validation)
