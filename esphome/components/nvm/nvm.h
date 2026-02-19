@@ -168,9 +168,11 @@ class NvmDataPartition : public NvmPartition {
   static constexpr float WARNING_L1_PERCENT = 80.0f;
   static constexpr float WARNING_L2_PERCENT = 90.0f;
 
+ public:
   NvmDataPartition(NvmPlatform *parent, const PartitionConfig &config)
       : NvmPartition(parent, config), initialized_(false), warned_L1_percent_(false) {}
 
+ protected:
   /// Validate header and check if reinitialization is needed
   /// @param expected_type The expected partition type
   /// @return true if header is valid and matches expected type

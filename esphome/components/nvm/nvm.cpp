@@ -722,7 +722,7 @@ bool PreferencesPartition::reset() {
   uint8_t version = VERSION;
   uint8_t type = static_cast<uint8_t>(PartitionType::PREFERENCES);
   uint16_t reserved = 0;
-  uint32_t first_free = POOL_HEADER_SIZE;
+  uint32_t first_free = HEADER_SIZE;
 
   this->write(0, reinterpret_cast<uint8_t *>(&magic), 4);
   this->write(4, &version, 1);
@@ -731,7 +731,7 @@ bool PreferencesPartition::reset() {
   this->write(8, reinterpret_cast<uint8_t *>(&pool_size), 4);
   this->write(12, reinterpret_cast<uint8_t *>(&first_free), 4);
 
-  this->pool_used_ = POOL_HEADER_SIZE;
+  this->pool_used_ = HEADER_SIZE;
   this->warned_L1_percent_ = false;
   ESP_LOGD(TAG, "Factory reset: NVM preferences cleared");
   return true;
@@ -787,7 +787,7 @@ void PreferencesPartition::ensure_initialized_() {
         this->read(12, reinterpret_cast<uint8_t *>(&first_free), 4);
         ESP_LOGVV(TAG, "Read first_free: %u", first_free);
 
-        if (first_free > pool_size || first_free < POOL_HEADER_SIZE) {
+        if (first_free > pool_size || first_free < HEADER_SIZE) {
           ESP_LOGW(TAG, "Invalid first_free offset (%u), reinitializing", first_free);
           needs_clear = true;
         } else {
@@ -848,7 +848,7 @@ void PreferencesPartition::ensure_initialized_() {
     uint8_t version = VERSION;
     uint8_t type = static_cast<uint8_t>(PartitionType::PREFERENCES);
     uint16_t reserved = 0;
-    uint32_t first_free = POOL_HEADER_SIZE;
+    uint32_t first_free = HEADER_SIZE;
 
     this->write(0, reinterpret_cast<uint8_t *>(&magic), 4);
     this->write(4, &version, 1);
@@ -864,10 +864,10 @@ void PreferencesPartition::ensure_initialized_() {
 
     // Verify first key slot is zero
     uint32_t verify_key = 0;
-    this->read(POOL_HEADER_SIZE, reinterpret_cast<uint8_t *>(&verify_key), 4);
+    this->read(HEADER_SIZE, reinterpret_cast<uint8_t *>(&verify_key), 4);
     ESP_LOGVV(TAG, "Verify first key slot: 0x%08X", verify_key);
 
-    this->pool_used_ = POOL_HEADER_SIZE;
+    this->pool_used_ = HEADER_SIZE;
   }
 
   this->initialized_ = true;
@@ -875,7 +875,7 @@ void PreferencesPartition::ensure_initialized_() {
 
 uint32_t PreferencesPartition::calculate_pool_used_() {
   uint32_t pool_size = this->get_size();
-  uint32_t addr = POOL_HEADER_SIZE;
+  uint32_t addr = HEADER_SIZE;
   uint32_t iterations = 0;
   const uint32_t max_iterations = 100;
 
