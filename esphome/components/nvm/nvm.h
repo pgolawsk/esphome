@@ -187,10 +187,11 @@ class PreferencesPartition : public NvmPartition, public Component, public ESPPr
   uint32_t pool_used_{0};
   bool warned_80_percent_{false};
 
-  // Pool header constants
-  static const uint32_t POOL_HEADER_SIZE = 9;  ///< magic(4) + version(1) + pool_size(4)
-  static const uint32_t MAGIC = 0xDEADBEEF;
-  static const uint8_t VERSION = 3;  ///< Version 3 for NVM preferences format
+  // Pool header constants (unified with KeyValuePartition)
+  static const uint32_t POOL_HEADER_SIZE =
+      16;  ///< magic(4) + version(1) + type(1) + reserved(2) + size(4) + first_free(4)
+  static const uint32_t MAGIC = 0x4B565354;  ///< "KVST" - unified magic for all NVM partitions
+  static const uint8_t VERSION = 1;          ///< Version 1 - unified across all partitions
 };
 
 /// Backend for individual preference objects
@@ -240,7 +241,14 @@ class RawPartition : public NvmPartition {
 ///
 /// This partition type provides a simple key-value store where values
 /// can be stored and retrieved by string keys. The storage format is:
-/// [key_len: 1 byte][key: N bytes][value_len: 2 bytes][value: M bytes]
+/// Header (16 bytes): [magic: 4][version: 1][type: 1][reserved: 2][size: 4][first_free: 4]
+///   - magic: 0x4B565354 ("KVST")
+///   - version: format version (1)
+///   - type: PartitionType (2 = KEY_VALUE)
+///   - reserved: reserved for future use
+///   - size: partition size in bytes
+///   - first_free: offset of first free slot (for O(1) usage tracking)
+/// Entries: [key_len: 1 byte][key: N bytes][value_len: 2 bytes][value: M bytes]
 class KeyValuePartition : public NvmPartition {
  public:
   using NvmPartition::NvmPartition;
@@ -293,10 +301,16 @@ class KeyValuePartition : public NvmPartition {
   float get_usage_percent();
 
  protected:
+  /// Initialize partition header (lazy initialization)
+  void ensure_initialized_();
+
+  /// Clear partition and write new header
+  void clear_partition_();
+
   /// Find key entry in storage
   /// @param key Key to find
-  /// @param offset Output: offset where key starts
-  /// @param value_offset Output: offset where value starts
+  /// @param offset Output: offset where key starts (relative to data area)
+  /// @param value_offset Output: offset where value starts (relative to data area)
   /// @param value_len Output: length of value
   /// @return true if key found
   bool find_key(const std::string &key, uint32_t &offset, uint32_t &value_offset, uint16_t &value_len);
@@ -305,13 +319,19 @@ class KeyValuePartition : public NvmPartition {
   void compact();
 
   /// Calculate used bytes by scanning all entries
-  /// @return Total bytes used
+  /// @return Total bytes used (including header)
   uint32_t calculate_used_bytes_();
 
   /// Check usage and warn if approaching capacity
   void check_usage_();
 
+  bool initialized_{false};        ///< Track if partition has been initialized
   bool warned_80_percent_{false};  ///< Track if 80% warning was issued this boot
+
+  // Header constants
+  static const uint32_t HEADER_SIZE = 16;  ///< magic(4) + version(1) + type(1) + reserved(2) + size(4) + first_free(4)
+  static const uint32_t MAGIC = 0x4B565354;  ///< "KVST" in little-endian
+  static const uint8_t VERSION = 1;
 };
 
 }  // namespace nvm

@@ -24,7 +24,7 @@ Example configuration:
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_OFFSET, CONF_SIZE, CONF_TYPE
+from esphome.const import CONF_ADDRESS, CONF_ID, CONF_OFFSET, CONF_SIZE, CONF_TYPE
 
 CODEOWNERS = ["@pgolawsk"]
 MULTI_CONF = True
@@ -140,6 +140,60 @@ _preferences_partition_count = [0]
 def reset_preferences_partition_count():
     """Reset the global preferences partition counter. Used in tests."""
     _preferences_partition_count[0] = 0
+
+
+# Track NVM I2C addresses globally (for MULTI_CONF validation)
+# Key: (i2c_id, address) tuple, Value: config_id
+_nvm_i2c_devices = {}
+
+
+def reset_nvm_i2c_devices():
+    """Reset the global NVM I2C device tracking. Used in tests."""
+    global _nvm_i2c_devices  # noqa: PLW0603
+    _nvm_i2c_devices = {}
+
+
+def validate_nvm_i2c_address(config):
+    """Validate that I2C address is unique per I2C bus across all NVM devices.
+
+    This prevents multiple NVM configurations from accessing the same
+    physical device on the same bus, which would cause data corruption.
+
+    Same address on different I2C buses is allowed (different physical devices).
+    """
+    # Get address from config (may be None for platforms without I2C)
+    address = config.get(CONF_ADDRESS)
+    if address is None:
+        return config
+
+    # Get I2C bus ID (defaults to None for default bus)
+    from esphome.const import CONF_I2C_ID
+
+    i2c_id = config.get(CONF_I2C_ID)
+    # Convert i2c_id to a hashable key (it might be an ID object)
+    if i2c_id is not None and hasattr(i2c_id, "id"):
+        i2c_id = i2c_id.id
+
+    # Create a unique key for this (bus, address) combination
+    device_key = (i2c_id, address)
+
+    # Get config ID for error messages
+    config_id = config.get(CONF_ID)
+    if hasattr(config_id, "id"):
+        config_id = config_id.id
+
+    # Check for duplicate
+    if device_key in _nvm_i2c_devices:
+        existing_id = _nvm_i2c_devices[device_key]
+        bus_desc = f" on I2C bus '{i2c_id}'" if i2c_id else " on default I2C bus"
+        raise cv.Invalid(
+            f"Duplicate NVM I2C address 0x{address:02X}{bus_desc}. "
+            f"Already used by '{existing_id}'. "
+            f"Each NVM device must have a unique I2C address on the same bus."
+        )
+
+    _nvm_i2c_devices[device_key] = config_id
+    return config
 
 
 # Base NVM platform schema (platforms will extend this)

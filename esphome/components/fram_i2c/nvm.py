@@ -107,6 +107,7 @@ CONFIG_SCHEMA = cv.All(
     validate_fram_address,
     validate_fram_config,
     nvm.validate_preferences_partition_count,
+    nvm.validate_nvm_i2c_address,
 )
 
 

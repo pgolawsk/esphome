@@ -183,6 +183,9 @@ void NvmPlatform::calculate_partition_offsets() {
 // ========== KeyValuePartition ==========
 
 int KeyValuePartition::get(const std::string &key, uint8_t *value, size_t max_len) {
+  // Ensure partition is initialized
+  this->ensure_initialized_();
+
   ESP_LOGV(TAG, "KeyValue '%s' get: key='%s', max_len=%zu", this->get_id().c_str(), key.c_str(), max_len);
 
   uint32_t offset, value_offset;
@@ -195,7 +198,8 @@ int KeyValuePartition::get(const std::string &key, uint8_t *value, size_t max_le
 
   // Limit read length
   size_t read_len = std::min(static_cast<size_t>(value_len), max_len);
-  if (!this->read(value_offset, value, read_len)) {
+  // value_offset is relative to data area, need to add HEADER_SIZE for absolute partition offset
+  if (!this->read(HEADER_SIZE + value_offset, value, read_len)) {
     return -1;
   }
 
@@ -204,6 +208,9 @@ int KeyValuePartition::get(const std::string &key, uint8_t *value, size_t max_le
 }
 
 bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t len) {
+  // Ensure partition is initialized
+  this->ensure_initialized_();
+
   ESP_LOGV(TAG, "KeyValue '%s' set: key='%s', len=%zu", this->get_id().c_str(), key.c_str(), len);
 
   // Check if key already exists
@@ -213,18 +220,18 @@ bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t
   if (this->find_key(key, existing_offset, value_offset, existing_len)) {
     // Key exists - check if new value fits
     if (len <= existing_len) {
-      // Overwrite in place
-      return this->write(value_offset, value, len);
+      // Overwrite in place (add HEADER_SIZE to convert from data-relative to absolute)
+      return this->write(HEADER_SIZE + value_offset, value, len);
     } else {
       // Need to erase and rewrite
       this->erase(key);
     }
   }
 
-  // Find end of storage
-  uint32_t write_offset = 0;
+  // Find end of storage (start after header)
+  uint32_t write_offset = HEADER_SIZE;
   uint8_t marker;
-  bool is_first_entry = true;  // Track if this is the first entry ever written
+  bool is_first_entry = (write_offset == HEADER_SIZE);  // Track if this is the first entry
   while (write_offset < this->get_size()) {
     if (!this->read(write_offset, &marker, 1)) {
       break;
@@ -248,11 +255,6 @@ bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t
     return false;
   }
 
-  // Log "Created partition" if this is the first entry and we're at offset 0 with 0xFF marker
-  if (is_first_entry && write_offset == 0 && marker == 0xFF) {
-    ESP_LOGI(TAG, "Created partition '%s': type=key_value, size=%u bytes", this->get_id().c_str(), this->get_size());
-  }
-
   // Write entry
   uint8_t key_len = static_cast<uint8_t>(key.size());
   uint16_t value_len = static_cast<uint16_t>(len);
@@ -264,6 +266,13 @@ bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t
 
   ESP_LOGV(TAG, "KeyValue '%s' set: key='%s' written at offset=%u", this->get_id().c_str(), key.c_str(), write_offset);
 
+  // Update first_free_offset if we wrote past it
+  uint32_t new_first_free = write_offset + entry_size;
+  if (new_first_free > HEADER_SIZE) {
+    this->write(12, reinterpret_cast<uint8_t *>(&new_first_free), 4);
+    ESP_LOGVV(TAG, "KeyValue '%s' updated first_free to %u", this->get_id().c_str(), new_first_free);
+  }
+
   // Check usage and warn if approaching capacity
   this->check_usage_();
 
@@ -271,6 +280,9 @@ bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t
 }
 
 bool KeyValuePartition::erase(const std::string &key) {
+  // Ensure partition is initialized
+  this->ensure_initialized_();
+
   ESP_LOGV(TAG, "KeyValue '%s' erase: key='%s'", this->get_id().c_str(), key.c_str());
 
   uint32_t offset, value_offset;
@@ -281,9 +293,9 @@ bool KeyValuePartition::erase(const std::string &key) {
     return false;  // Key not found
   }
 
-  // Mark as deleted by zeroing key length
+  // Mark as deleted by zeroing key length (need to add HEADER_SIZE to convert to absolute offset)
   uint8_t zero = 0;
-  this->write(offset, &zero, 1);
+  this->write(HEADER_SIZE + offset, &zero, 1);
 
   ESP_LOGV(TAG, "KeyValue '%s' erase: key='%s' erased", this->get_id().c_str(), key.c_str());
   return true;
@@ -311,7 +323,8 @@ bool KeyValuePartition::set_string(const std::string &key, const std::string &va
 
 bool KeyValuePartition::find_key(const std::string &key, uint32_t &offset, uint32_t &value_offset,
                                  uint16_t &value_len) {
-  uint32_t current_offset = 0;
+  // Start after header
+  uint32_t current_offset = HEADER_SIZE;
 
   while (current_offset < this->get_size()) {
     uint8_t key_len;
@@ -331,10 +344,10 @@ bool KeyValuePartition::find_key(const std::string &key, uint32_t &offset, uint3
       this->read(current_offset + 1, stored_key.get(), key_len);
 
       if (std::string(stored_key.get(), stored_key.get() + key_len) == key) {
-        // Found it!
-        offset = current_offset;
+        // Found it! Return offsets relative to data area (without header)
+        offset = current_offset - HEADER_SIZE;
         this->read(current_offset + 1 + key_len, reinterpret_cast<uint8_t *>(&value_len), 2);
-        value_offset = current_offset + 1 + key_len + 2;
+        value_offset = current_offset + 1 + key_len + 2 - HEADER_SIZE;
         return true;
       }
     }
@@ -354,8 +367,9 @@ void KeyValuePartition::compact() {
 }
 
 uint32_t KeyValuePartition::calculate_used_bytes_() {
-  uint32_t current_offset = 0;
-  uint32_t used_bytes = 0;
+  // Start after header and include header in used bytes
+  uint32_t current_offset = HEADER_SIZE;
+  uint32_t used_bytes = HEADER_SIZE;  // Account for header
 
   while (current_offset < this->get_size()) {
     uint8_t key_len;
@@ -392,7 +406,21 @@ uint32_t KeyValuePartition::calculate_used_bytes_() {
   return used_bytes;
 }
 
-uint32_t KeyValuePartition::get_used_bytes() { return this->calculate_used_bytes_(); }
+uint32_t KeyValuePartition::get_used_bytes() {
+  // Use first_free_offset from header for O(1) calculation
+  this->ensure_initialized_();
+
+  uint32_t first_free = HEADER_SIZE;
+  this->read(12, reinterpret_cast<uint8_t *>(&first_free), 4);
+
+  // If first_free is 0 or invalid, fall back to scanning
+  if (first_free < HEADER_SIZE || first_free > this->get_size()) {
+    return this->calculate_used_bytes_();
+  }
+
+  ESP_LOGVV(TAG, "KeyValue '%s' get_used_bytes: first_free=%u", this->get_id().c_str(), first_free);
+  return first_free;
+}
 
 float KeyValuePartition::get_usage_percent() {
   uint32_t used = this->get_used_bytes();
@@ -420,6 +448,124 @@ void KeyValuePartition::dump_config() {
     float usage_percent = this->get_usage_percent();
     ESP_LOGCONFIG(TAG, "  Used: %u bytes (%.1f%%)", used, usage_percent);
   }
+  // Initialize if needed to show header info
+  this->ensure_initialized_();
+  if (this->initialized_) {
+    uint32_t magic = 0;
+    uint8_t version = 0;
+    uint8_t type = 0;
+    uint32_t stored_size = 0;
+    uint32_t first_free = 0;
+    this->read(0, reinterpret_cast<uint8_t *>(&magic), 4);
+    this->read(4, &version, 1);
+    this->read(5, &type, 1);
+    this->read(8, reinterpret_cast<uint8_t *>(&stored_size), 4);
+    this->read(12, reinterpret_cast<uint8_t *>(&first_free), 4);
+    ESP_LOGCONFIG(TAG, "  Header: magic=0x%08X, version=%u, type=%u, size=%u, first_free=%u", magic, version, type,
+                  stored_size, first_free);
+  }
+}
+
+void KeyValuePartition::ensure_initialized_() {
+  if (this->initialized_) {
+    return;
+  }
+
+  uint32_t magic = 0;
+  this->read(0, reinterpret_cast<uint8_t *>(&magic), 4);
+  ESP_LOGVV(TAG, "KeyValue '%s' init: magic=0x%08X, expected=0x%08X", this->get_id().c_str(), magic, MAGIC);
+
+  bool needs_clear = false;
+
+  if (magic != MAGIC) {
+    ESP_LOGW(TAG, "KeyValue partition '%s' has invalid magic (0x%08X), initializing", this->get_id().c_str(), magic);
+    needs_clear = true;
+  } else {
+    uint8_t version = 0;
+    this->read(4, &version, 1);
+    ESP_LOGVV(TAG, "KeyValue '%s' init: version=%u, expected=%u", this->get_id().c_str(), version, VERSION);
+    if (version != VERSION) {
+      ESP_LOGW(TAG, "KeyValue partition '%s' version mismatch (%u vs %u), reinitializing", this->get_id().c_str(),
+               version, VERSION);
+      needs_clear = true;
+    } else {
+      // Validate partition type
+      uint8_t type = 0;
+      this->read(5, &type, 1);
+      ESP_LOGVV(TAG, "KeyValue '%s' init: type=%u, expected=%u", this->get_id().c_str(), type,
+                static_cast<uint8_t>(PartitionType::KEY_VALUE));
+      if (type != static_cast<uint8_t>(PartitionType::KEY_VALUE)) {
+        ESP_LOGW(TAG, "KeyValue partition '%s' type mismatch (%u vs %u), reinitializing", this->get_id().c_str(), type,
+                 static_cast<uint8_t>(PartitionType::KEY_VALUE));
+        needs_clear = true;
+      } else {
+        // Validate stored partition size
+        uint32_t stored_size = 0;
+        this->read(8, reinterpret_cast<uint8_t *>(&stored_size), 4);
+        if (stored_size != this->get_size()) {
+          ESP_LOGW(TAG, "KeyValue partition '%s' size changed (%u vs %u), reinitializing", this->get_id().c_str(),
+                   stored_size, this->get_size());
+          needs_clear = true;
+        } else {
+          // Validate first_free_offset - scan to find actual end if needed
+          uint32_t first_free = 0;
+          this->read(12, reinterpret_cast<uint8_t *>(&first_free), 4);
+          ESP_LOGVV(TAG, "KeyValue '%s' init: first_free=%u", this->get_id().c_str(), first_free);
+
+          // Sanity check: if first_free is beyond partition size, reinitialize
+          if (first_free > this->get_size()) {
+            ESP_LOGW(TAG, "KeyValue partition '%s' has invalid first_free offset (%u), reinitializing",
+                     this->get_id().c_str(), first_free);
+            needs_clear = true;
+          }
+        }
+      }
+    }
+  }
+
+  if (needs_clear) {
+    this->clear_partition_();
+  }
+
+  this->initialized_ = true;
+}
+
+void KeyValuePartition::clear_partition_() {
+  ESP_LOGI(TAG, "Created partition '%s': type=key_value, size=%u bytes", this->get_id().c_str(), this->get_size());
+
+  uint32_t partition_size = this->get_size();
+
+  // Clear the entire partition
+  for (uint32_t i = 0; i < partition_size; i += 32) {
+    std::array<uint8_t, 32> zeros{};
+    uint32_t len = (i + 32 > partition_size) ? (partition_size - i) : 32;
+    this->write(i, zeros.data(), len);
+  }
+
+  // Write header
+  uint32_t magic = MAGIC;
+  this->write(0, reinterpret_cast<uint8_t *>(&magic), 4);
+
+  uint8_t version = VERSION;
+  this->write(4, &version, 1);
+
+  uint8_t type = static_cast<uint8_t>(PartitionType::KEY_VALUE);
+  this->write(5, &type, 1);
+
+  uint16_t reserved = 0;
+  this->write(6, reinterpret_cast<uint8_t *>(&reserved), 2);
+
+  uint32_t size = partition_size;
+  this->write(8, reinterpret_cast<uint8_t *>(&size), 4);
+
+  // Write first free offset (initially after header)
+  uint32_t first_free = HEADER_SIZE;
+  this->write(12, reinterpret_cast<uint8_t *>(&first_free), 4);
+
+  // Verify write
+  uint32_t verify_magic = 0;
+  this->read(0, reinterpret_cast<uint8_t *>(&verify_magic), 4);
+  ESP_LOGVV(TAG, "KeyValue '%s' verify: magic=0x%08X", this->get_id().c_str(), verify_magic);
 }
 
 // ========== PreferencesPartition ==========
@@ -485,11 +631,21 @@ bool PreferencesPartition::reset() {
     uint32_t len = (i + 32 > pool_size) ? (pool_size - i) : 32;
     this->write(i, zeros.data(), len);
   }
-  // Write magic, version, and pool_size
-  uint32_t value = MAGIC;
-  this->write(0, reinterpret_cast<uint8_t *>(&value), 4);
-  this->write(4, &VERSION, 1);
-  this->write(5, reinterpret_cast<uint8_t *>(&pool_size), 4);
+
+  // Write unified header (16 bytes): magic(4) + version(1) + type(1) + reserved(2) + size(4) + first_free(4)
+  uint32_t magic = MAGIC;
+  uint8_t version = VERSION;
+  uint8_t type = static_cast<uint8_t>(PartitionType::PREFERENCES);
+  uint16_t reserved = 0;
+  uint32_t first_free = POOL_HEADER_SIZE;
+
+  this->write(0, reinterpret_cast<uint8_t *>(&magic), 4);
+  this->write(4, &version, 1);
+  this->write(5, &type, 1);
+  this->write(6, reinterpret_cast<uint8_t *>(&reserved), 2);
+  this->write(8, reinterpret_cast<uint8_t *>(&pool_size), 4);
+  this->write(12, reinterpret_cast<uint8_t *>(&first_free), 4);
+
   this->pool_used_ = POOL_HEADER_SIZE;
   this->warned_80_percent_ = false;
   ESP_LOGD(TAG, "Factory reset: NVM preferences cleared");
@@ -504,6 +660,7 @@ void PreferencesPartition::ensure_initialized_() {
   uint32_t pool_size = this->get_size();
   ESP_LOGVV(TAG, "Lazy initialization - pool_size=%u", pool_size);
 
+  // Read unified header (16 bytes): magic(4) + version(1) + type(1) + reserved(2) + size(4) + first_free(4)
   uint32_t magic = 0;
   this->read(0, reinterpret_cast<uint8_t *>(&magic), 4);
   ESP_LOGVV(TAG, "Read magic: 0x%08X, expected: 0x%08X", magic, MAGIC);
@@ -511,29 +668,45 @@ void PreferencesPartition::ensure_initialized_() {
   bool needs_clear = false;
 
   if (magic != MAGIC) {
-    ESP_LOGW(TAG, "Magic mismatch, initializing pool");
+    ESP_LOGW(TAG, "Preferences partition '%s' has invalid magic (0x%08X), initializing", this->get_id().c_str(), magic);
     needs_clear = true;
   } else {
-    uint8_t version_from_nvm = 0;
-    this->read(4, &version_from_nvm, 1);
-    ESP_LOGVV(TAG, "Version: %u, expected: %u", version_from_nvm, VERSION);
-    if (version_from_nvm != VERSION) {
-      ESP_LOGW(TAG, "NVM preferences version mismatch. Clearing preferences.");
+    // Magic matches - verify version and type
+    uint8_t version = 0;
+    this->read(4, &version, 1);
+    ESP_LOGVV(TAG, "Read version: %u, expected: %u", version, VERSION);
+
+    uint8_t type = 0;
+    this->read(5, &type, 1);
+    ESP_LOGVV(TAG, "Read type: %u, expected: %u", type, static_cast<uint8_t>(PartitionType::PREFERENCES));
+
+    if (version != VERSION) {
+      ESP_LOGW(TAG, "Version mismatch (%u != %u), reinitializing pool", version, VERSION);
+      needs_clear = true;
+    } else if (type != static_cast<uint8_t>(PartitionType::PREFERENCES)) {
+      ESP_LOGW(TAG, "Type mismatch (%u != %u), reinitializing pool", type,
+               static_cast<uint8_t>(PartitionType::PREFERENCES));
       needs_clear = true;
     } else {
-      // Validate first key slot - should be 0 or a valid key with reasonable size
-      uint32_t first_key = 0;
-      uint32_t first_size = 0;
-      this->read(POOL_HEADER_SIZE, reinterpret_cast<uint8_t *>(&first_key), 4);
-      this->read(POOL_HEADER_SIZE + 4, reinterpret_cast<uint8_t *>(&first_size), 4);
-      ESP_LOGVV(TAG, "First key at offset %u: 0x%08X, size: %u", POOL_HEADER_SIZE, first_key, first_size);
+      // Read stored pool size
+      uint32_t stored_size = 0;
+      this->read(8, reinterpret_cast<uint8_t *>(&stored_size), 4);
+      ESP_LOGVV(TAG, "Read stored_size: %u, actual: %u", stored_size, pool_size);
 
-      // If first key is non-zero, validate the size is reasonable
-      if (first_key != 0) {
-        // Size should be reasonable (less than pool size and not garbage)
-        if (first_size > pool_size || first_size > 10000) {
-          ESP_LOGW(TAG, "First key slot has invalid size %u, clearing pool", first_size);
+      if (stored_size != pool_size) {
+        ESP_LOGW(TAG, "Pool size mismatch (%u != %u), reinitializing", stored_size, pool_size);
+        needs_clear = true;
+      } else {
+        // Read first_free offset
+        uint32_t first_free = 0;
+        this->read(12, reinterpret_cast<uint8_t *>(&first_free), 4);
+        ESP_LOGVV(TAG, "Read first_free: %u", first_free);
+
+        if (first_free > pool_size || first_free < POOL_HEADER_SIZE) {
+          ESP_LOGW(TAG, "Invalid first_free offset (%u), reinitializing", first_free);
           needs_clear = true;
+        } else {
+          this->pool_used_ = first_free;
         }
       }
     }
@@ -545,7 +718,7 @@ void PreferencesPartition::ensure_initialized_() {
 
     // Check if pool size decreased and data doesn't fit
     uint32_t stored_pool_size = 0;
-    this->read(5, reinterpret_cast<uint8_t *>(&stored_pool_size), 4);
+    this->read(8, reinterpret_cast<uint8_t *>(&stored_pool_size), 4);
     ESP_LOGVV(TAG, "Stored pool size: %u, current: %u, used: %u", stored_pool_size, pool_size, this->pool_used_);
 
     if (stored_pool_size != 0 && pool_size < stored_pool_size) {
@@ -584,11 +757,20 @@ void PreferencesPartition::ensure_initialized_() {
       uint32_t len = (i + 32 > pool_size) ? (pool_size - i) : 32;
       this->write(i, zeros.data(), len);
     }
-    // Write magic, version, and pool_size
-    uint32_t value = MAGIC;
-    this->write(0, reinterpret_cast<uint8_t *>(&value), 4);
-    this->write(4, &VERSION, 1);
-    this->write(5, reinterpret_cast<uint8_t *>(&pool_size), 4);
+
+    // Write unified header (16 bytes): magic(4) + version(1) + type(1) + reserved(2) + size(4) + first_free(4)
+    uint32_t magic = MAGIC;
+    uint8_t version = VERSION;
+    uint8_t type = static_cast<uint8_t>(PartitionType::PREFERENCES);
+    uint16_t reserved = 0;
+    uint32_t first_free = POOL_HEADER_SIZE;
+
+    this->write(0, reinterpret_cast<uint8_t *>(&magic), 4);
+    this->write(4, &version, 1);
+    this->write(5, &type, 1);
+    this->write(6, reinterpret_cast<uint8_t *>(&reserved), 2);
+    this->write(8, reinterpret_cast<uint8_t *>(&pool_size), 4);
+    this->write(12, reinterpret_cast<uint8_t *>(&first_free), 4);
 
     // Verify write
     uint32_t verify_magic = 0;
@@ -745,6 +927,8 @@ bool NvmPreferenceBackend::save(const uint8_t *data, size_t len) {
   uint32_t new_used = addr + entry_size;
   if (new_used > this->partition_->pool_used_) {
     this->partition_->pool_used_ = new_used;
+    // Update first_free_offset in header
+    this->partition_->write(12, reinterpret_cast<uint8_t *>(&new_used), 4);
   }
 
   // Check for 80% warning
