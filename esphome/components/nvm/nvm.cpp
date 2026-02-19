@@ -1,4 +1,5 @@
 #include "nvm.h"
+#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
 #include <array>
@@ -63,15 +64,8 @@ void NvmPlatform::setup() {
     }
   }
 
-  // Call setup() on preferences partitions to activate them as global preferences backend
-  // PreferencesPartition inherits from Component, so we need to call its setup() method
-  for (const auto &partition : partitions_) {
-    if (partition->get_type() == PartitionType::PREFERENCES) {
-      // Cast to PreferencesPartition to call its setup() method
-      auto *pref_partition = static_cast<PreferencesPartition *>(partition.get());
-      pref_partition->setup();
-    }
-  }
+  // Note: PreferencesPartition is registered with App in add_partition(),
+  // so its setup() will be called automatically by the Application
 
   ESP_LOGCONFIG(TAG, "NVM Platform initialized with %zu partitions", partitions_.size());
 }
@@ -92,9 +86,13 @@ NvmPartition *NvmPlatform::add_partition(const PartitionConfig &config) {
   std::unique_ptr<NvmPartition> partition;
 
   switch (config.type) {
-    case PartitionType::PREFERENCES:
-      partition = std::make_unique<PreferencesPartition>(this, config);
+    case PartitionType::PREFERENCES: {
+      auto pref_partition = std::make_unique<PreferencesPartition>(this, config);
+      // Register with Application so setup() is called automatically
+      App.register_component(pref_partition.get());
+      partition = std::move(pref_partition);
       break;
+    }
     case PartitionType::RAW:
       partition = std::make_unique<RawPartition>(this, config);
       break;
@@ -105,6 +103,9 @@ NvmPartition *NvmPlatform::add_partition(const PartitionConfig &config) {
       ESP_LOGE(TAG, "Unknown partition type: %d", static_cast<int>(config.type));
       return nullptr;
   }
+
+  ESP_LOGI(TAG, "Created partition '%s': type=%s, offset=0x%04X, size=%u bytes", config.id.c_str(),
+           partition_type_to_string(config.type), config.offset, config.size);
 
   partitions_.push_back(std::move(partition));
   return partitions_.back().get();
@@ -177,10 +178,13 @@ void NvmPlatform::calculate_partition_offsets() {
 // ========== KeyValuePartition ==========
 
 int KeyValuePartition::get(const std::string &key, uint8_t *value, size_t max_len) {
+  ESP_LOGV(TAG, "KeyValue '%s' get: key='%s', max_len=%zu", this->get_id().c_str(), key.c_str(), max_len);
+
   uint32_t offset, value_offset;
   uint16_t value_len;
 
   if (!this->find_key(key, offset, value_offset, value_len)) {
+    ESP_LOGV(TAG, "KeyValue '%s' get: key='%s' not found", this->get_id().c_str(), key.c_str());
     return -1;  // Key not found
   }
 
@@ -190,10 +194,13 @@ int KeyValuePartition::get(const std::string &key, uint8_t *value, size_t max_le
     return -1;
   }
 
+  ESP_LOGV(TAG, "KeyValue '%s' get: key='%s' found, len=%zu", this->get_id().c_str(), key.c_str(), read_len);
   return static_cast<int>(read_len);
 }
 
 bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t len) {
+  ESP_LOGV(TAG, "KeyValue '%s' set: key='%s', len=%zu", this->get_id().c_str(), key.c_str(), len);
+
   // Check if key already exists
   uint32_t existing_offset, value_offset;
   uint16_t existing_len;
@@ -243,14 +250,18 @@ bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t
   this->write(write_offset + 1 + key.size(), reinterpret_cast<uint8_t *>(&value_len), 2);
   this->write(write_offset + 1 + key.size() + 2, value, len);
 
+  ESP_LOGV(TAG, "KeyValue '%s' set: key='%s' written at offset=%u", this->get_id().c_str(), key.c_str(), write_offset);
   return true;
 }
 
 bool KeyValuePartition::erase(const std::string &key) {
+  ESP_LOGV(TAG, "KeyValue '%s' erase: key='%s'", this->get_id().c_str(), key.c_str());
+
   uint32_t offset, value_offset;
   uint16_t value_len;
 
   if (!this->find_key(key, offset, value_offset, value_len)) {
+    ESP_LOGV(TAG, "KeyValue '%s' erase: key='%s' not found", this->get_id().c_str(), key.c_str());
     return false;  // Key not found
   }
 
@@ -258,6 +269,7 @@ bool KeyValuePartition::erase(const std::string &key) {
   uint8_t zero = 0;
   this->write(offset, &zero, 1);
 
+  ESP_LOGV(TAG, "KeyValue '%s' erase: key='%s' erased", this->get_id().c_str(), key.c_str());
   return true;
 }
 

@@ -49,16 +49,34 @@ PARTITION_TYPE_KEY_VALUE = PartitionType.KEY_VALUE
 # Configuration keys
 CONF_PARTITIONS = "partitions"
 
+
+def _validate_partition_id(config):
+    """Validate and set the correct ID type based on partition type."""
+    partition_type = config[CONF_TYPE]
+    if partition_type == "preferences":
+        config[CONF_ID] = cv.declare_id(PreferencesPartition)(config[CONF_ID])
+    elif partition_type == "raw":
+        config[CONF_ID] = cv.declare_id(RawPartition)(config[CONF_ID])
+    elif partition_type == "key_value":
+        config[CONF_ID] = cv.declare_id(KeyValuePartition)(config[CONF_ID])
+    return config
+
+
 # Partition configuration schema
-PARTITION_SCHEMA = cv.Schema(
-    {
-        cv.Required(CONF_ID): cv.declare_id(NvmPartition),
-        cv.Required(CONF_TYPE): cv.one_of(
-            "preferences", "raw", "key_value", lower=True
-        ),
-        cv.Required(CONF_SIZE): cv.All(cv.validate_bytes, cv.Range(min=1)),
-        cv.Optional(CONF_OFFSET, default=0): cv.All(cv.positive_int, cv.Range(min=0)),
-    }
+PARTITION_SCHEMA = cv.All(
+    cv.Schema(
+        {
+            cv.Required(CONF_ID): cv.use_id(NvmPartition),
+            cv.Required(CONF_TYPE): cv.one_of(
+                "preferences", "raw", "key_value", lower=True
+            ),
+            cv.Required(CONF_SIZE): cv.All(cv.validate_bytes, cv.Range(min=1)),
+            cv.Optional(CONF_OFFSET, default=0): cv.All(
+                cv.positive_int, cv.Range(min=0)
+            ),
+        }
+    ),
+    _validate_partition_id,
 )
 
 
@@ -78,28 +96,40 @@ async def register_nvm_platform(platform_var, config):
         ]  # Already converted to int by cv.validate_bytes
         partition_offset = partition_config[CONF_OFFSET]
 
-        # Determine partition type enum
+        # Determine partition type enum and target class
         if partition_type == "preferences":
             partition_type_enum = PARTITION_TYPE_PREFERENCES
+            target_class = PreferencesPartition
         elif partition_type == "raw":
             partition_type_enum = PARTITION_TYPE_RAW
+            target_class = RawPartition
         elif partition_type == "key_value":
             partition_type_enum = PARTITION_TYPE_KEY_VALUE
+            target_class = KeyValuePartition
         else:
             raise cv.Invalid(f"Unknown partition type: {partition_type}")
 
         # Create partition config struct
-        partition_id = partition_config[CONF_ID].id
+        partition_id_obj = partition_config[CONF_ID]
         partition_config_struct = cg.StructInitializer(
             nvm_ns.class_("PartitionConfig"),
-            ("id", partition_id),
+            ("id", partition_id_obj.id),
             ("type", partition_type_enum),
             ("offset", partition_offset),
             ("size", partition_size),
         )
 
-        # Add partition to platform
-        partition_var = cg.add(platform_var.add_partition(partition_config_struct))
+        # Create partition via platform and register it as a variable
+        # Pvariable both declares the global variable AND registers it with CORE
+        # so it can be accessed via id() in lambdas
+        # Note: add_partition() returns NvmPartition*, we cast to the derived type
+        partition_var = cg.Pvariable(
+            partition_id_obj,
+            cg.RawExpression(
+                f"static_cast<{target_class}*>"
+                f"({platform_var.add_partition(partition_config_struct)})"
+            ),
+        )
 
         # If this is a preferences partition, register it as a component
         if partition_type == "preferences":
