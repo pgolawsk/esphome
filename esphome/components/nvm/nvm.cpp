@@ -109,7 +109,7 @@ NvmPartition *NvmPlatform::add_partition(const PartitionConfig &config) {
       return nullptr;
   }
 
-  ESP_LOGI(TAG, "Configured partition '%s': type=%s, offset=0x%04X, size=%u bytes", config.id.c_str(),
+  ESP_LOGD(TAG, "Configured partition '%s': type=%s, offset=0x%04X, size=%u bytes", config.id.c_str(),
            partition_type_to_string(config.type), config.offset, config.size);
 
   partitions_.push_back(std::move(partition));
@@ -224,6 +224,7 @@ bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t
   // Find end of storage
   uint32_t write_offset = 0;
   uint8_t marker;
+  bool is_first_entry = true;  // Track if this is the first entry ever written
   while (write_offset < this->get_size()) {
     if (!this->read(write_offset, &marker, 1)) {
       break;
@@ -232,6 +233,7 @@ bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t
       // Empty slot found
       break;
     }
+    is_first_entry = false;  // Found an existing entry, so not first time
     // Skip entry: key_len(1) + key + value_len(2) + value
     uint8_t key_len = marker;
     uint16_t value_len;
@@ -244,6 +246,11 @@ bool KeyValuePartition::set(const std::string &key, const uint8_t *value, size_t
   if (write_offset + entry_size > this->get_size()) {
     ESP_LOGE(TAG, "KeyValue partition '%s' full, cannot store key '%s'", this->get_id().c_str(), key.c_str());
     return false;
+  }
+
+  // Log "Created partition" if this is the first entry and we're at offset 0 with 0xFF marker
+  if (is_first_entry && write_offset == 0 && marker == 0xFF) {
+    ESP_LOGI(TAG, "Created partition '%s': type=key_value, size=%u bytes", this->get_id().c_str(), this->get_size());
   }
 
   // Write entry
@@ -570,7 +577,7 @@ void PreferencesPartition::ensure_initialized_() {
 
   if (needs_clear) {
     this->pool_cleared_ = true;
-    ESP_LOGI(TAG, "Clearing pool area...");
+    ESP_LOGI(TAG, "Created partition '%s': type=preferences, size=%u bytes", this->get_id().c_str(), pool_size);
     // Clear the pool area by writing zeros
     for (uint32_t i = 0; i < pool_size; i += 32) {
       std::array<uint8_t, 32> zeros{};
