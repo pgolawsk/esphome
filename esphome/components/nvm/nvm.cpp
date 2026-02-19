@@ -1018,7 +1018,7 @@ bool NvmPreferenceBackend::save(const uint8_t *data, size_t len) {
 
   // Check for WARNING_L1_PERCENT warning
   float usage_percent = (this->partition_->pool_used_ * 100.0f) / this->partition_->get_size();
-  if (usage_percent > WARNING_L1_PERCENT && !this->partition_->warned_L1_percent_) {
+  if (usage_percent > NvmDataPartition::WARNING_L1_PERCENT && !this->partition_->warned_L1_percent_) {
     ESP_LOGW(TAG, "Pool is %.0f%% full (%u/%u bytes). Consider increasing partition size", usage_percent,
              this->partition_->pool_used_, this->partition_->get_size());
     this->partition_->warned_L1_percent_ = true;
