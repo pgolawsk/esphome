@@ -3,12 +3,15 @@
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/preferences.h"
-#include "esphome/components/safe_mode/safe_mode.h"
 #include <vector>
 #include <memory>
 
 namespace esphome {
 namespace nvm {
+
+/// RTC key for boot loop counter - used to delegate to NVS preferences
+/// TODO: Use safe_mode::RTC_KEY once PR #14121 is merged
+static const uint32_t RTC_KEY = 233825507UL;
 
 /// Partition types supported by NVM
 enum class PartitionType : uint8_t {
@@ -38,7 +41,7 @@ class NvmPlatform;
 /// interfaces for accessing the underlying storage.
 class NvmPartition {
  public:
-  NvmPartition(NvmPlatform *parent, const PartitionConfig &config);
+  NvmPartition(NvmPlatform *parent, PartitionConfig config);
   virtual ~NvmPartition() = default;
 
   /// Read data from partition
@@ -139,10 +142,10 @@ class NvmPlatform : public Component {
   std::vector<std::unique_ptr<NvmPartition>> partitions_;
 
   /// Check for partition overlaps
-  bool check_partition_overlap(const PartitionConfig &config);
+  bool check_partition_overlap_(const PartitionConfig &config);
 
   /// Calculate automatic offsets for partitions
-  void calculate_partition_offsets();
+  void calculate_partition_offsets_();
 };
 
 /// Base class for data partitions (Preferences and KeyValue)
@@ -150,6 +153,19 @@ class NvmPlatform : public Component {
 /// This class provides common functionality for both partition types,
 /// including header management, validation, and usage tracking.
 class NvmDataPartition : public NvmPartition {
+ public:
+  /// Header constants - public for use by backend classes
+  static const uint32_t HEADER_SIZE = 16;  ///< magic(4) + version(1) + type(1) + reserved(2) + size(4) + first_free(4)
+  static const uint32_t MAGIC = 0x4B565354;  ///< "KVST" - unified magic for all NVM partitions
+  static const uint8_t VERSION = 1;          ///< Version 1 - unified across all partitions
+
+  /// Usage warning thresholds
+  static constexpr float WARNING_L1_PERCENT = 80.0f;
+  static constexpr float WARNING_L2_PERCENT = 90.0f;
+
+  NvmDataPartition(NvmPlatform *parent, const PartitionConfig &config)
+      : NvmPartition(parent, config), initialized_(false), warned_L1_percent_(false) {}
+
  protected:
   /// Header offsets
   static const uint8_t OFF_MAGIC = 0;
@@ -159,20 +175,6 @@ class NvmDataPartition : public NvmPartition {
   static const uint8_t OFF_SIZE = 8;
   static const uint8_t OFF_FIRST_FREE = 12;
 
-  /// Header constants
-  static const uint32_t HEADER_SIZE = 16;  ///< magic(4) + version(1) + type(1) + reserved(2) + size(4) + first_free(4)
-  static const uint32_t MAGIC = 0x4B565354;  ///< "KVST" - unified magic for all NVM partitions
-  static const uint8_t VERSION = 1;          ///< Version 1 - unified across all partitions
-
-  /// Usage warning thresholds
-  static constexpr float WARNING_L1_PERCENT = 80.0f;
-  static constexpr float WARNING_L2_PERCENT = 90.0f;
-
- public:
-  NvmDataPartition(NvmPlatform *parent, const PartitionConfig &config)
-      : NvmPartition(parent, config), initialized_(false), warned_L1_percent_(false) {}
-
- protected:
   /// Validate header and check if reinitialization is needed
   /// @param expected_type The expected partition type
   /// @return true if header is valid and matches expected type
@@ -204,7 +206,7 @@ class NvmDataPartition : public NvmPartition {
   void log_mismatch_(const char *issue, uint32_t actual, uint32_t expected);
 
  public:
-  virtual ~NvmDataPartition() = default;
+  ~NvmDataPartition() override = default;
 
   /// Get the percentage of partition space used
   /// @return Usage percentage (0-100)
@@ -214,17 +216,44 @@ class NvmDataPartition : public NvmPartition {
   bool warned_L1_percent_;  ///< Track if L1 warning was issued this boot
 };
 
+class NvmPreferenceBackend;
+
+class NvmPreferenceObject {
+ public:
+  NvmPreferenceObject() = default;
+  explicit NvmPreferenceObject(NvmPreferenceBackend *backend) : backend_(backend) {}
+
+  template<typename T> bool save(const T *src);
+  template<typename T> bool load(T *dest);
+
+ protected:
+  NvmPreferenceBackend *backend_{nullptr};
+};
+
+template<typename Derived> class NvmPreferencesMixin {
+ public:
+  template<typename T, enable_if_t<is_trivially_copyable<T>::value, bool> = true>
+  NvmPreferenceObject make_preference(uint32_t type, bool in_flash) {
+    return static_cast<Derived *>(this)->make_preference(sizeof(T), type, in_flash);
+  }
+
+  template<typename T, enable_if_t<is_trivially_copyable<T>::value, bool> = true>
+  NvmPreferenceObject make_preference(uint32_t type) {
+    return static_cast<Derived *>(this)->make_preference(sizeof(T), type);
+  }
+};
+
 /// Specialized partition for preferences storage
 ///
-/// This partition type integrates with ESPHome's preferences system,
-/// allowing global variables and other preferences to be stored in
-/// external NVM instead of flash.
-///
-/// When created, this partition automatically registers itself as the
-/// global preferences backend, replacing the default flash-based storage.
-class PreferencesPartition : public NvmDataPartition, public Component, public ESPPreferences {
+/// This partition type acts as a standalone preferences system,
+/// allowing components specifically configured to use it to store
+/// preferences in external NVM instead of flash.
+class PreferencesPartition : public NvmDataPartition,
+                             public Component,
+                             public NvmPreferencesMixin<PreferencesPartition> {
  public:
   using NvmDataPartition::NvmDataPartition;
+  using NvmPreferencesMixin<PreferencesPartition>::make_preference;
 
   /// Setup the preferences backend
   void setup() override;
@@ -235,11 +264,11 @@ class PreferencesPartition : public NvmDataPartition, public Component, public E
   /// Dump configuration
   void dump_config() override;
 
-  // ========== ESPPreferences interface ==========
-  ESPPreferenceObject make_preference(size_t length, uint32_t type, bool in_flash) override;
-  ESPPreferenceObject make_preference(size_t length, uint32_t type) override;
-  bool sync() override;
-  bool reset() override;
+  // ========== NVM Preferences interface ==========
+  NvmPreferenceObject make_preference(size_t length, uint32_t type, bool in_flash);
+  NvmPreferenceObject make_preference(size_t length, uint32_t type);
+  bool sync();
+  bool reset();
 
  protected:
   friend class NvmPreferenceBackend;
@@ -250,18 +279,17 @@ class PreferencesPartition : public NvmDataPartition, public Component, public E
   /// Calculate pool usage
   uint32_t calculate_pool_used_();
 
-  ESPPreferences *nvs_preferences_{nullptr};  ///< Original NVS preferences for delegated keys
   bool pool_cleared_{false};
   uint32_t pool_used_{0};
 };
 
-/// Backend for individual preference objects
-class NvmPreferenceBackend : public ESPPreferenceBackend {
+/// Backend for individual preference objects (standalone, not inheriting from final class)
+class NvmPreferenceBackend {
  public:
   NvmPreferenceBackend(PreferencesPartition *partition, uint32_t type) : partition_(partition), type_(type) {}
 
-  bool save(const uint8_t *data, size_t len) override;
-  bool load(uint8_t *data, size_t len) override;
+  bool save(const uint8_t *data, size_t len);
+  bool load(uint8_t *data, size_t len);
 
  protected:
   /// Find or allocate a key slot
@@ -270,6 +298,18 @@ class NvmPreferenceBackend : public ESPPreferenceBackend {
   PreferencesPartition *partition_;
   uint32_t type_;
 };
+
+template<typename T> bool NvmPreferenceObject::save(const T *src) {
+  if (this->backend_ == nullptr)
+    return false;
+  return this->backend_->save(reinterpret_cast<const uint8_t *>(src), sizeof(T));
+}
+
+template<typename T> bool NvmPreferenceObject::load(T *dest) {
+  if (this->backend_ == nullptr)
+    return false;
+  return this->backend_->load(reinterpret_cast<uint8_t *>(dest), sizeof(T));
+}
 
 /// Specialized partition for raw data storage
 ///
@@ -383,10 +423,10 @@ class KeyValuePartition : public NvmDataPartition, public Component {
   /// @param value_offset Output: offset where value starts (relative to data area)
   /// @param value_len Output: length of value
   /// @return true if key found
-  bool find_key(const std::string &key, uint32_t &offset, uint32_t &value_offset, uint16_t &value_len);
+  bool find_key_(const std::string &key, uint32_t &offset, uint32_t &value_offset, uint16_t &value_len);
 
   /// Compact storage (remove deleted entries)
-  void compact();
+  void compact_();
 
   /// Calculate used bytes by scanning all entries
   /// @return Total bytes used (including header)
