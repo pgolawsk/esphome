@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/preferences.h"
+#include "esphome/components/safe_mode/safe_mode.h"
 #include <vector>
 #include <memory>
 
@@ -211,48 +212,17 @@ class NvmDataPartition : public NvmPartition {
   bool warned_L1_percent_;  ///< Track if L1 warning was issued this boot
 };
 
-class NvmPreferenceBackend;
-
-class NvmPreferenceObject {
- public:
-  NvmPreferenceObject() = default;
-  explicit NvmPreferenceObject(NvmPreferenceBackend *backend) : backend_(backend) {}
-
-  template<typename T> bool save(const T *src);
-  template<typename T> bool load(T *dest);
-
- protected:
-  NvmPreferenceBackend *backend_{nullptr};
-};
-
-template<typename Derived> class NvmPreferencesMixin {
- public:
-  template<typename T, enable_if_t<is_trivially_copyable<T>::value, bool> = true>
-  NvmPreferenceObject make_preference(uint32_t type, bool in_flash) {
-    return static_cast<Derived *>(this)->make_preference(sizeof(T), type, in_flash);
-  }
-
-  template<typename T, enable_if_t<is_trivially_copyable<T>::value, bool> = true>
-  NvmPreferenceObject make_preference(uint32_t type) {
-    return static_cast<Derived *>(this)->make_preference(sizeof(T), type);
-  }
-
- private:
-  NvmPreferencesMixin() = default;
-  friend Derived;
-};
-
 /// Specialized partition for preferences storage
 ///
-/// This partition type acts as a standalone preferences system,
-/// allowing components specifically configured to use it to store
-/// preferences in external NVM instead of flash.
-class PreferencesPartition : public NvmDataPartition,
-                             public Component,
-                             public NvmPreferencesMixin<PreferencesPartition> {
+/// This partition type integrates with ESPHome's preferences system,
+/// allowing global variables and other preferences to be stored in
+/// external NVM instead of flash.
+///
+/// When created, this partition automatically registers itself as the
+/// global preferences backend, replacing the default flash-based storage.
+class PreferencesPartition : public NvmDataPartition, public Component, public ESPPreferences {
  public:
   using NvmDataPartition::NvmDataPartition;
-  using NvmPreferencesMixin<PreferencesPartition>::make_preference;
 
   /// Setup the preferences backend
   void setup() override;
@@ -263,11 +233,11 @@ class PreferencesPartition : public NvmDataPartition,
   /// Dump configuration
   void dump_config() override;
 
-  // ========== NVM Preferences interface ==========
-  NvmPreferenceObject make_preference(size_t length, uint32_t type, bool in_flash);
-  NvmPreferenceObject make_preference(size_t length, uint32_t type);
-  bool sync();
-  bool reset();
+  // ========== ESPPreferences interface ==========
+  ESPPreferenceObject make_preference(size_t length, uint32_t type, bool in_flash) override;
+  ESPPreferenceObject make_preference(size_t length, uint32_t type) override;
+  bool sync() override;
+  bool reset() override;
 
  protected:
   friend class NvmPreferenceBackend;
@@ -278,17 +248,18 @@ class PreferencesPartition : public NvmDataPartition,
   /// Calculate pool usage
   uint32_t calculate_pool_used_();
 
+  ESPPreferences *nvs_preferences_{nullptr};  ///< Original NVS preferences for delegated keys
   bool pool_cleared_{false};
   uint32_t pool_used_{0};
 };
 
-/// Backend for individual preference objects (standalone, not inheriting from final class)
-class NvmPreferenceBackend {
+/// Backend for individual preference objects
+class NvmPreferenceBackend : public ESPPreferenceBackend {
  public:
   NvmPreferenceBackend(PreferencesPartition *partition, uint32_t type) : partition_(partition), type_(type) {}
 
-  bool save(const uint8_t *data, size_t len);
-  bool load(uint8_t *data, size_t len);
+  bool save(const uint8_t *data, size_t len) override;
+  bool load(uint8_t *data, size_t len) override;
 
  protected:
   /// Find or allocate a key slot
@@ -297,18 +268,6 @@ class NvmPreferenceBackend {
   PreferencesPartition *partition_;
   uint32_t type_;
 };
-
-template<typename T> bool NvmPreferenceObject::save(const T *src) {
-  if (this->backend_ == nullptr)
-    return false;
-  return this->backend_->save(reinterpret_cast<const uint8_t *>(src), sizeof(T));
-}
-
-template<typename T> bool NvmPreferenceObject::load(T *dest) {
-  if (this->backend_ == nullptr)
-    return false;
-  return this->backend_->load(reinterpret_cast<uint8_t *>(dest), sizeof(T));
-}
 
 /// Specialized partition for raw data storage
 ///
